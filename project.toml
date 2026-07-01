@@ -1,0 +1,23 @@
+dependencies = [
+    "fashionstar-uart-servo-python", # vendored as src/fashionstar-uart-servo-python
+    "pyserial",
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
+
+[project]
+name = "3dof-delta-arm"
+version = "0.1.0"
+description = "Dummy controller and motor test harness for a 3DOF delta arm."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyserial",
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
+
+[tool.pyright]
+extraPaths = ["src/fashionstar-uart-servo-python/src"]

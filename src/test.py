@@ -1,11 +1,16 @@
 
-from arm_controller.arm_controller import ArmController
+from arm_controller import ArmController
 
 
-arm = ArmController()
+arm = ArmController(
+    servo_uart_ports=[
+        {"servo_id": 0, "port": "COM6"},
+        {"servo_id": 1, "port": "COM7"},
+        {"servo_id": 2, "port": "COM8"},
+    ]
+)
 
 
 def main():
-    # Example usage of the ArmController
-    arm.move_to_position(10, 20, 30)
+    arm.set_xyz_target(10, 20, 30)
     arm.stop()

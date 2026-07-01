@@ -1,0 +1,4 @@
+{
+  "extraPaths": ["src/fashionstar-uart-servo-python/src"],
+  "include": ["src"]
+}

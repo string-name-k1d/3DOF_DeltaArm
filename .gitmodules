@@ -1,0 +1,3 @@
+[submodule "src/fashionstar-uart-servo-python"]
+	path = src/fashionstar-uart-servo-python
+	url = https://github.com/servodevelop/fashionstar-uart-servo-python

@@ -1,0 +1,3 @@
+[submodule "motor_driver/fashionstart-uart-servo"]
+	path = motor_driver/fashionstart-uart-servo
+	url = https://github.com/servodevelop/fashionstar-uart-servo-cpp.git

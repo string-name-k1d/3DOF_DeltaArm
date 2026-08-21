@@ -22,8 +22,10 @@ workspace/package):
 ```
 3DOF_DeltaArm/                     <-- Git Repository Root
 ├── README.md
+├── AGENT.md                          # Guide for AI agents (build/test/conventions)
 ├── .gitignore
 ├── .gitmodules                    # FashionStart UART servo SDK submodule
+├── .ai/                             # Agent docs: ARCHITECTURE.md, CHANGELOGS.md
 ├── arm_description/            # Package 1: URDF/meshes (model + frames)
 │   ├── package.xml
 │   ├── CMakeLists.txt
@@ -52,7 +54,7 @@ workspace/package):
 │   ├── CMakeLists.txt
 │   ├── config/                   # SRDF, joint_limits, kinematics.yaml
 │   └── launch/                   # MoveIt planning & execution launches
-└── Dockerfile                     # ROS 2 Humble dev container (Windows build path)
+└── Dockerfile                     # ROS 2 Humble build container (USB/serial for HW access)
 ```
 
 > The `arm_description`, `arm_moveit_config`, and the model-side of
@@ -102,7 +104,7 @@ below.
   | 4            | temperature      | °C         |
   | 5            | ping / online    | 0 or 1     |
 
-## Building (Linux / Ubuntu with ROS 2)
+## Building
 
 The FashionStart driver is a git submodule:
 
@@ -110,14 +112,45 @@ The FashionStart driver is a git submodule:
 git submodule update --init --recursive
 ```
 
-Place the workspace, install deps, and build:
+### Option A — Docker (recommended, especially on Windows)
+
+A `Dockerfile` is provided. It builds a ROS 2 **Humble** (Ubuntu 22.04) image
+with build tools, USB/serial utilities, and a `rosuser` in the `dialout` /
+`plugdev` groups (so the container can access `/dev/ttyUSB*` for the
+FashionStar bus-servo adapter).
 
 ```bash
-# From the repo root (3DOF_DeltaArm)
-#   If using the provided Dockerfile (ROS 2 Humble):
-#     docker build -t arm .   # builds a Humble image
-#     docker run  --rm -it arm
-#   Inside the container (or on a native ROS 2 Humble host):
+# Build the image (from the repo root):
+docker build -t arm .
+
+# Native Linux host — mount the workspace + forward USB devices:
+xhost +local:docker  # (Linux only, for RViz)
+docker run --rm -it \
+    --network host \
+    --device /dev/ttyUSB0 \
+    --group-add $(getent group dialout | cut -d: -f3) \
+    -v "$PWD:/home/rosuser/3DOF_DeltaArm:rw" \
+    -w /home/rosuser/3DOF_DeltaArm \
+    arm bash
+
+# Windows (PowerShell) — mount the workspace; add your COM port as needed:
+docker run --rm -it `
+    -v "${PWD}:C:\ws:rw" ^
+    -w C:\ws `
+    arm bash
+```
+
+Inside the container (the workspace is auto-sourced via `.bashrc`):
+
+```bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+### Option B — Native ROS 2 Humble host
+
+```bash
+# Install ROS 2 deps, then from the repo root:
 sudo apt-get update && sudo apt-get install -y \
     ros-humble-ament-cmake \
     ros-humble-rclcpp \

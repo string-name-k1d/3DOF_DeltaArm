@@ -30,7 +30,7 @@ uservo = UartServoManager(uart)
 
 # 设置舵机为阻尼模式
 uservo.set_damping(SERVO_ID, 200)
-
+        
 # 舵机角度查询
 while True:
     angle = uservo.query_servo_angle(SERVO_ID)

@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 import serial
 
 from uservo import UartServoInfo, UartServoManager
-
+from math import sqrt, sin, cos, atan
+import numpy as np
 
 @dataclass
 class ServoUARTConfig:
@@ -52,6 +53,83 @@ class ServoUARTConfig:
             serial_kwargs=serial_kwargs,
         )
 
+@dataclass
+class ArmMechConfig:
+    # Servo arms: linkage for servo to arm
+    # front: directly connected to servo
+    servo_upper_arm_len: float
+    servo_lower_arm_len: float
+    
+    # offset of servo from center of arm
+    servo_pos: Tuple[float, float, float]
+    platform_joint_pos: Tuple[float, float, float]
+    
+    servo_to_arm_base_len: float
+    # Arm lengths: linkage for arm to end effector
+    upper_arm_len: float
+    lower_arm_len: float
+    arm_joint_len: float
+    
+def arm_computer_ik(
+    tar_pos: np.ndarray, 
+    mech_config: Sequence[ArmMechConfig]
+    ) -> Sequence[float]:
+    
+    results = []
+    cur_result = 0.0
+    tar_pos = np.array(tar_pos)
+    tar_det = np.sum(tar_pos**2)
+    
+    for config in mech_config:
+        """
+        Aliases
+        """
+        B = config.servo_pos
+        P = config.platform_joint_pos
+        
+        base_len = config.servo_to_arm_base_len
+        joint_len = config.arm_joint_len
+        u_len = config.upper_arm_len
+        l_len = config.lower_arm_len
+        
+        """
+        First compute ik of overall arm
+        (x, y, z) -> theta (target angle of upper arm)
+        """
+        E = 0
+        F = 0
+        G = 0
+        t = (-F + sqrt(E**2 + F **2 - G**2)) / (G - E)
+        theta = 2 * atan(t)
+        
+        """
+        Then compute ik of servo arm part
+        theta -> tar_angle
+        """
+        # desired point for joint
+        p = (base_len + joint_len * cos(theta), joint_len* sin(theta))
+        # dist between centers
+        dist = sqrt(p[0]**2 + p[1]**2) 
+        
+        # find intersection of two circles
+        a = (u_len**2 + dist**2 - l_len**2) / (2 * dist) # origin to chord dist
+        h = sqrt(u_len**2 - a**2) # height of chord
+        a /= dist
+        h /= dist
+        
+        # taking solution with larger y coordinates here
+        # !!! may need to flip both +- if incorrect !!!
+        tar_ctrl_pt = (
+            a * p[0] - h * p[1],
+            a * p[1] + h * p[0]
+            )
+        
+        # convert control point to angle
+        cur_result = atan(tar_ctrl_pt[1] / tar_ctrl_pt[0])
+        
+        results.append(cur_result)
+    
+    return results
 
 class ArmController:
     def __init__(
@@ -107,6 +185,16 @@ class ArmController:
 
         self._joint_targets[servo_id] = float(angle)
         return bool(self._servo_managers[servo_id].set_servo_angle(servo_id, float(angle), **kwargs))
+    
+    def get_servo_actual_angle(self, servo_id: int) -> Optional[float]:
+        if servo_id not in self._servo_managers:
+            raise KeyError(f"Servo {servo_id} has not been configured")
+        return self._servo_managers[servo_id].query_servo_angle()
+    
+    def get_servo_target_angle(self, servo_id: int) -> Optional[float]:
+        if servo_id not in self._servo_managers:
+            raise KeyError(f"Servo {servo_id} has not been configured")
+        return self._joint_targets.get(servo_id)
 
     def set_joint_targets(self, joint_targets: Mapping[int, float] | Sequence[float]) -> Dict[int, float]:
         if isinstance(joint_targets, Mapping):

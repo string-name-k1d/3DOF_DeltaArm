@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<!--
+  My Arm launch.
+
+  Modes:
+    * Real hardware (default):   launches arm_system, which runs the
+      controller node AND the motor-driver node in one process (tight coupling
+      between the ROS application and the serial-bus hardware).
+
+    * Simulation:               simulation:=true  launches ONLY the controller
+      node (arm_controller). The motor driver is NOT started - the arm
+      simulation is provided externally, in another workspace/package, and
+      talks to the controller over the same topic/service/action names.
+
+  Usage:
+    ros2 launch arm_bringup delta_arm.launch                     (hardware)
+    ros2 launch arm_bringup delta_arm.launch simulation:=true    (simulation)
+-->
+<launch>
+  <!-- simulation:=true  -> run the controller only (no motor driver) -->
+  <arg name="simulation" default="false"/>
+  <arg name="params_file"
+       default="$(find-pkg-share arm_bringup)/config/arm_params.yaml"/>
+
+  <!-- Real hardware: controller + driver, tightly coupled in one process. -->
+  <node pkg="arm_hardware" exec="arm_system" name="arm_system"
+        required="true" output="screen" unless="$(var simulation)">
+    <param from="$(var params_file)"/>
+  </node>
+
+  <!-- Simulation: controller only; the motor driver is provided externally. -->
+  <node pkg="arm_hardware" exec="arm_controller" name="arm_controller"
+        output="screen" if="$(var simulation)">
+    <param from="$(var params_file)"/>
+  </node>
+</launch>

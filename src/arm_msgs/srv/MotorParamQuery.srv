@@ -1,0 +1,16 @@
+# Generic hardware-query interface shared by all query types.
+#
+# request_type selects what to read on the given servo; response_type mirrors /
+# refines it and value carries the measured quantity. For example:
+#   request_type: 0  -> joint angle                 (deg, response_type 0)
+#   request_type: 1  -> voltage  (mV)
+#   request_type: 2  -> current  (mA)
+#   request_type: 3  -> power    (mW)
+#   request_type: 4  -> temperature (deg. C)
+#   request_type: 5  -> ping / online flag          (0 or 1)
+int32 servo_id
+int32 request_type
+---
+int32 response_type
+int32 value
+bool success

@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd"?>
+<package format="3">
+  <name>arm_hardware</name>
+  <version>0.1.0</version>
+  <description>
+    Drivers and controllers for the 3DOF delta arm.
+
+    Hosts the two-stage inverse-kinematics arm library, the task-space
+    controller (set_pos action / get_pos streaming), the manual-control
+    (WASD) tool, and the FashionStart UART-servo motor driver (fsuartservo +
+    cserialport built from the checked-out submodule sources). All of these
+    live in one package so the controller + driver can run tightly coupled in
+    a single process (arm_system) without fragile cross-package C++ library
+    exports.
+  </description>
+  <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>arm_msgs</build_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
+  <depend>arm_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

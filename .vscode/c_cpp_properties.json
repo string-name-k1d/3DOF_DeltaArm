@@ -4,8 +4,9 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/include",
-                "${workspaceFolder}/motor_driver/fashionstart-uart-servo/include"
+                "${workspaceFolder}/src/arm_hardware/include",
+                "${workspaceFolder}/src/arm_hardware/motor_driver/fashionstart-uart-servo/include",
+                "${workspaceFolder}/src/arm_hardware/motor_driver/fashionstart-uart-servo/dependency/CSerialPort/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/g++",

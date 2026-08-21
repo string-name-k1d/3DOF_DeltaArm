@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd"?>
+<package format="3">
+  <name>arm_msgs</name>
+  <version>0.1.0</version>
+  <description>
+    Custom ROS 2 interfaces for the 3DOF delta arm: actions (SetPosition),
+    messages (ArmPosition, MotorTargets) and services (TogglePositionStream,
+    MotorParamQuery, EmergencyStop).
+  </description>
+  <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
+
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

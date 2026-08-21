@@ -1,0 +1,9 @@
+# Emergency interrupt for the arm controller.
+#
+# activate = true  -> halt immediately: cancel any active set_pos goal, reject
+#                     new goals, zero the motor outputs and republish them.
+# activate = false -> release the emergency state (allow set_pos again).
+bool activate
+---
+bool success
+bool emergency_active

@@ -1,0 +1,38 @@
+# ============================================================================
+# My Arm configuration.
+#
+# Two nodes run inside the "arm_system" executable (or standalone): each
+# reads its own ROS parameter namespace below. Load with:
+#   ros2 run arm arm_system --ros-args \
+#       --params-file config/arm_params.yaml
+# (the launch files point at this file automatically).
+# ============================================================================
+
+arm_controller:
+  ros__parameters:
+    # Continuous get_pos stream rate on topic "arm/pos" (Hz).
+    feedback_rate: 20.0
+    # Coordinate frame attached to the published ArmPosition messages.
+    feedback_frame: "base_link"
+
+arm_motor_driver:
+  ros__parameters:
+    # UART/serial port of the FashionStar bus-servo adapter.
+    # Linux: "/dev/ttyUSB0"   Windows: "COM8"
+    port_name: "/dev/ttyUSB0"
+    # port_name: "COM8"
+    baudrate: 115200
+    # Binary ids of the three delta-arm actuators.
+    servo_ids: [0, 1, 2]
+    # Calibrated zero/home joint angles (deg), one per motor.
+    start_angles: [0.0, 0.0, 0.0]
+    # Whether the driver should ping + sync servos at startup.
+    auto_init: true
+
+arm_manual_control:
+  ros__parameters:
+    # Manual-control step size and which components WASD drives.
+    step: 0.01
+    axis0: "z"
+    axis1: "y"
+

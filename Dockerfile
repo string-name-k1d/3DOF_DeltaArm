@@ -37,6 +37,9 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o 
 # Install ROS 2 Humble Base + rosdep + colcon
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-ros-base \
+    ros-humble-rclcpp-action \
+    ros-humble-ament-cmake-gtest \
+    ros-humble-xacro \
     ros-dev-tools \
     python3-colcon-common-extensions \
     python3-rosdep \

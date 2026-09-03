@@ -1,3 +1,12 @@
 # Python launch bytecode
 __pycache__/
 *.py[cod]
+
+# colcon build artifacts
+build/
+install/
+log/
+
+# Temp build helper scripts
+build_arm.sh
+run_driver.sh

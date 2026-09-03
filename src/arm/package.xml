@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd"?>
+<package format="3">
+  <name>arm</name>
+  <version>0.1.0</version>
+  <description>
+    The 3DOF delta arm package. A single ROS 2 package hosting the custom
+    interfaces (SetPosition action, ArmPosition / MotorTargets messages,
+    EmergencyStop / MotorParamQuery / TogglePositionStream services), the
+    two-stage inverse-kinematics library, the task-space controller node
+    (set_pos action / get_pos streaming), the manual-control (WASD) tool,
+    the FashionStart UART-servo motor driver (fsuartservo + cserialport built
+    from the checked-out submodule sources), and the arm simulators (SFML 2D
+    + Gazebo 3D). The controller + driver can run tightly coupled in a single
+    process (arm_system).
+  </description>
+  <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
+  <depend>sensor_msgs</depend>
+
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <exec_depend>sfml</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_ros2_control</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

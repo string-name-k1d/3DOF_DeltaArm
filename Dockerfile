@@ -45,6 +45,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-rosdep \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Gazebo Classic (11) + the gazebo_ros_pkgs ROS 2 bridge (and related
+# model/robot-state packages) so the arm simulation can run in the container.
+# gazebo_ros_pkgs pulls in gazebo_ros, gazebo_ros2_control, gazebo_plugins, etc.
+# libglm-dev is the math library the Gazebo sim (src/sim arm_sim_gazebo) uses.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gazebo \
+    ros-humble-gazebo-ros-pkgs \
+    ros-humble-robot-state-publisher \
+    ros-humble-joint-state-publisher \
+    ros-humble-controller-manager \
+    libglm-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install the ROS 2 to WebSocket bridge (rosbridge_suite): lets web browsers /
+# external clients talk to the ROS 2 graph from the container (default port 9090).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-rosbridge-suite \
+    && rm -rf /var/lib/apt/lists/*
+
 # Initialize rosdep for workspace dependency management
 RUN rosdep init && rosdep update
 

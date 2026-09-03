@@ -2,6 +2,7 @@
 #define arm__MOTOR_DRIVER_NODE_HPP_
 
 #include <memory>
+#include <mutex>
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -44,6 +45,12 @@ private:
   std::string feedback_frame_;
   int8_t online_[3];
   int8_t error_[3];
+
+  /// Guards all access to driver_ : the node runs on a MultiThreadedExecutor,
+  /// so the feedback timer and the motor-targets subscription / query service
+  /// may be called concurrently and must not touch the shared serial port at
+  /// the same time.
+  std::mutex bus_mutex_;
 };
 
 }  // namespace DeltaArmDriverNode

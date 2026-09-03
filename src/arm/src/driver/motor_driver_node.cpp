@@ -75,6 +75,7 @@ void MotorDriverNode::declareParams()
 void MotorDriverNode::onMotorTargets(const arm::msg::MotorTargets::SharedPtr msg)
 {
   float angles[3] = {msg->angles[0], msg->angles[1], msg->angles[2]};
+  std::lock_guard<std::mutex> lock(bus_mutex_);
   driver_->set_target_angles(angles, 3);
 }
 
@@ -82,6 +83,7 @@ void MotorDriverNode::onParamQuery(
   const std::shared_ptr<arm::srv::MotorParamQuery::Request> request,
   const std::shared_ptr<arm::srv::MotorParamQuery::Response> response)
 {
+  std::lock_guard<std::mutex> lock(bus_mutex_);
   response->response_type = request->request_type;
   response->value = 0;
   response->success = driver_->query(
@@ -107,6 +109,7 @@ void MotorDriverNode::publishFeedback()
   msg->header.stamp = now();
   msg->header.frame_id = feedback_frame_;
 
+  std::lock_guard<std::mutex> lock(bus_mutex_);
   for (int i = 0; i < 3; ++i) {
     bool online = false;
     try {

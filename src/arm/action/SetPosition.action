@@ -7,7 +7,7 @@
 #  The ROS 2 action server is exposed as:   delta_arm/set_pos
 # ============================================================================
 ## Goal: desired end-effector position (meters)
-geometry_msgs/msg/Twist target
+geometry_msgs/Twist target
 
 ---
 ## Result: completion summary
@@ -16,4 +16,4 @@ string message
 
 ---
 ## Feedback: current end-effector estimate while the goal executes
-geometry_msgs/msg/Point current
+geometry_msgs/Point current

@@ -23,12 +23,10 @@ find_package(action_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
-# Optional: SFML (2D visual simulator), Gazebo (3D simulator) and GLM (used by
-# the Gazebo sim). All are OPTIONAL so the hardware/controller/driver build
-# succeeds headless even when the simulators are not installed.
+# Optional: SFML (2D visual simulator). Optional so the hardware/controller/
+# driver build succeeds headless even when the simulator is not installed.
+# (The Gazebo 3D simulator lives in the separate arm_gazebo package.)
 find_package(SFML 2.5 COMPONENTS graphics window system QUIET)
-find_package(gazebo_ros QUIET)
-find_package(glm QUIET)
 
 # ---------------------------------------------------------------------------
 # Custom ROS interfaces defined and used inside this same package.
@@ -68,6 +66,23 @@ set(FSUS_INC
 )
 
 # ---------------------------------------------------------------------------
+# Kinematics library (ROS-neutral). Exported so the separate arm_gazebo
+# package can re-use DeltaArm::Arm without recompiling the IK source.
+# ---------------------------------------------------------------------------
+add_library(arm_kinematics SHARED src/axis/delta-arm.cpp)
+target_include_directories(arm_kinematics PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+install(TARGETS arm_kinematics
+  EXPORT export_${PROJECT_NAME}
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+)
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_include_directories(include)
+
+# ---------------------------------------------------------------------------
 # Motor-driver wrapper library (FSUS binding, ROS-neutral)
 # ---------------------------------------------------------------------------
 add_library(arm_lib SHARED src/driver/motor_driver.cpp)
@@ -101,21 +116,20 @@ endfunction()
 
 # Single-process: controller + motor driver (real hardware, tight coupling).
 add_executable(arm_system
-  src/axis/delta-arm.cpp
   src/controller/delta_arm_controller_node.cpp
   src/driver/motor_driver_node.cpp
   src/system/delta_arm_system_main.cpp
 )
 arm_ros_target(arm_system)
-target_link_libraries(arm_system arm_lib)
+target_link_libraries(arm_system arm_lib arm_kinematics)
 
 # Standalone controller (simulation / external driver).
 add_executable(arm_controller
-  src/axis/delta-arm.cpp
   src/controller/delta_arm_controller_node.cpp
   src/controller/delta_arm_controller_main.cpp
 )
 arm_ros_target(arm_controller)
+target_link_libraries(arm_controller arm_kinematics)
 
 # Standalone motor driver.
 add_executable(arm_motor_driver
@@ -141,7 +155,6 @@ arm_link_ros(arm_manual)
 # file is present (requires a display for visualization).
 if(SFML_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.cpp")
   add_executable(arm_sim_sfml
-    src/axis/delta-arm.cpp
     src/sim/arm_sim_sfml.cpp
     src/sim/arm_sim_sfml_main.cpp
   )
@@ -150,25 +163,9 @@ if(SFML_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.
   )
   arm_link_ros(arm_sim_sfml)
   target_link_libraries(arm_sim_sfml
+    arm_kinematics
     sfml-graphics sfml-window sfml-system
   )
-endif()
-
-# Gazebo 3D simulator - built only when gazebo_ros + glm are available AND the
-# source files are present.
-if(gazebo_ros_FOUND AND glm_FOUND
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_gazebo.cpp"
-   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_gazebo_main.cpp")
-  add_executable(arm_sim_gazebo
-    src/axis/delta-arm.cpp
-    src/sim/arm_sim_gazebo.cpp
-    src/sim/arm_sim_gazebo_main.cpp
-  )
-  target_include_directories(arm_sim_gazebo PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-  )
-  arm_link_ros(arm_sim_gazebo)
-  target_link_libraries(arm_sim_gazebo glm)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -191,11 +188,6 @@ if(TARGET arm_sim_sfml)
     RUNTIME DESTINATION lib/${PROJECT_NAME}
   )
 endif()
-if(TARGET arm_sim_gazebo)
-  install(TARGETS arm_sim_gazebo
-    RUNTIME DESTINATION lib/${PROJECT_NAME}
-  )
-endif()
 
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
@@ -203,17 +195,9 @@ install(DIRECTORY launch
 install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
 )
-install(DIRECTORY urdf
-  DESTINATION share/${PROJECT_NAME}
-  OPTIONAL
-)
-install(DIRECTORY meshes
-  DESTINATION share/${PROJECT_NAME}
-  OPTIONAL
-)
-install(DIRECTORY worlds
-  DESTINATION share/${PROJECT_NAME}
-  OPTIONAL
+
+install(DIRECTORY include/
+  DESTINATION include
 )
 
 # ---------------------------------------------------------------------------
@@ -223,10 +207,10 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 
   ament_add_gtest(test_arm
-    src/axis/delta-arm.cpp
     test/test_delta_arm.cpp
   )
   target_include_directories(test_arm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(test_arm arm_kinematics)
 
   install(TARGETS test_arm
     RUNTIME DESTINATION lib/${PROJECT_NAME}

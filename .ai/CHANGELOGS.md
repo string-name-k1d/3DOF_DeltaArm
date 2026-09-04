@@ -5,6 +5,75 @@ Entries are grouped by major phase. The working tree is **staged but uncommitted
 
 ---
 
+## [Unreleased] — Isolate Gazebo simulation into an independent `arm_gazebo` package
+
+The optional Gazebo sim was moved out of the `arm` package into its own ROS 2
+package `arm_gazebo`, physically under `gazebo/`, so the core `arm` package
+builds without any Gazebo dependencies.
+
+### Added
+- New package `gazebo/` (`arm_gazebo`) with its own `package.xml`,
+  `CMakeLists.txt`, `include/arm_gazebo/`, `src/`, `launch/`, `worlds/`,
+  `urdf/`, `meshes/`, `config/`.
+  - `ArmGazebo::ArmSimGazeboNode` (`src/arm_sim_gazebo.cpp`) — a Gazebo-side
+    delta-arm simulator that re-uses `DeltaArm::Arm` kinematics from `arm`:
+    subscribes `arm/target_position`, publishes `arm/current_position`.
+  - `launch/arm_gazebo.launch` — controller + gazebo sim nodes.
+- The `arm` package now builds an exported shared **`arm_kinematics`** library
+  from `src/axis/delta-arm.cpp`, exported as `arm::arm_kinematics`, so both the
+  `arm` executables and the external `arm_gazebo` package link the same IK code
+  instead of recompiling it.
+- `arm` now installs its public headers (`install(DIRECTORY include/ ...)`) so
+  `find_package(arm)` provides `arm/delta_arm.hpp` to downstream packages.
+
+### Changed
+- `arm` `CMakeLists.txt`: removed `find_package(gazebo_ros/glm QUIET)`, the
+  `arm_sim_gazebo` target, and its installs; executables/tests now link
+  `arm_kinematics` instead of compiling `src/axis/delta-arm.cpp` directly.
+- `arm` `package.xml`: removed Gazebo-only deps (gazebo_ros,
+  gazebo_ros2_control, robot_state_publisher, xacro, joint_state_publisher,
+  controller_manager); kept `sfml`, `ros2launch`.
+- Removed empty root `worlds/`, `urdf/`, `meshes/` directories (now under
+  `gazebo/`).
+
+### Build note
+`gazebo/` is a package nested inside the `arm` package, so colcon does **not**
+auto-discover it. To build it, stage the repo and `gazebo/` as **siblings**
+under a parent `src/` (e.g. symlink `src/arm` → repo, `src/arm_gazebo` →
+`gazebo/`), then run `colcon build` there. Verified: both `arm` and
+`arm_gazebo` compile, link, and install cleanly in that layout.
+
+---
+
+## [Unreleased] — Flatten `src/arm/*` multi-package workspace → single `arm` package at repo root
+
+The repo had become a colcon **workspace** with a single `src/arm` package
+inside it. To match the integration pattern used by sibling projects (packages
+live at the repo root and get mounted/copied into the container's
+`ros2_ws/src/<pkg>`), the package was flattened so the **package root is the
+repo root**.
+
+### Changed
+- Moved everything from `src/arm/*` up to the repo root, dropping the
+  `src/arm/` wrapper:
+  - `src/arm/{package.xml,CMakeLists.txt}` → root
+  - `src/arm/src/{axis,controller,driver,manual,sim,system}/` → `src/...`
+  - `src/arm/include/arm/` → `include/arm/`
+  - `src/arm/{action,msg,srv,launch,config,test,urdf,meshes,worlds}` → root
+  - `src/arm/motor_driver/` → `motor_driver/`
+- **Submodule relocated**: `fashionstart-uart-servo` moved from
+  `src/arm/motor_driver/` to `motor_driver/`. Updated `.gitmodules` path, the
+  submodule `.git` gitdir pointer, and its internal `core.worktree`.
+- **Build / runtime paths**: `build_arm.sh` colcon `--base-paths` now targets
+  the repo root; the params file moved to `config/arm_params.yaml`.
+- **Docs**: `README.md` params/IK paths, `AGENT.md` workspace snapshot +
+  validation commands, and `.vscode/c_cpp_properties.json` include paths all
+  updated to the repo-root layout.
+- The `src/arm` gitlinks/entries were removed from the index; git detects the
+  flatten as a series of renames.
+
+---
+
 ## [Unreleased] — Workspace reorganization: `my_arm` → `arm` + source categorization
 
 ### Added

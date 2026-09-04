@@ -1,45 +1,50 @@
 # AGENT.md — Guide for AI Coding Agents
 
 This file gives AI agents (and human collaborators) the context needed to work on
-the `arm` delta-arm workspace without guessing project conventions.
+the `arm` delta-arm package without guessing project conventions.
 
 ---
 
 ## 1. Workspace snapshot
 
+This repository is a **single ROS 2 package** named `arm`. The package root **is**
+the repo root (not a `src/<pkg>` wrapper). When integrated as a submodule in
+another project (e.g. `fyp`), the repo is mounted/copied into the container's
+`ros2_ws/src/arm` (same pattern as `drone_ctrl` / `apriltag_ros`).
+
 | Concern | Where it lives |
 |---|---|
-| Custom interfaces (action/msg/srv) | `src/arm_msgs/`  (`SetPosition`, `ArmPosition`, `MotorTargets`, `TogglePositionStream`, `MotorParamQuery`, `EmergencyStop`) |
-| Controller + driver library + nodes | `src/arm_hardware/` |
-| Source files categorized by node | `src/arm_hardware/src/{axis,controller,driver,manual,system}/` |
-| GTest unit tests | `src/arm_hardware/test/test_delta_arm.cpp` |
-| Launch + params | `src/arm_bringup/` |
-| FashionStart SDK (submodule) | `src/arm_hardware/motor_driver/fashionstart-uart-servo/` |
-| Robot model / URDF | `src/arm_description/` |
-| MoveIt config | `src/arm_moveit_config/` |
+| Custom interfaces (action/msg/srv) | `action/` (SetPosition), `msg/` (ArmPosition, MotorTargets), `srv/` (EmergencyStop, MotorParamQuery, TogglePositionStream) |
+| Kinematics + controller + driver code | `src/{axis,controller,driver,manual,sim,system}/` |
+| Public headers | `include/arm/` (included as `#include "arm/<header>.hpp"`) |
+| GTest unit tests | `test/test_delta_arm.cpp` |
+| Launch + params | `launch/`, `config/arm_params.yaml` |
+| FashionStart SDK (submodule) | `motor_driver/fashionstart-uart-servo/` |
+| Gazebo simulation package | `gazebo/` — a separate package `arm_gazebo` (see §6) |
 | Build container | `Dockerfile` (ROS 2 Humble) |
 
-> **Terminology:** the package/library names use `arm_*`. The C++ *namespace*
-> inside the kinematics library is `DeltaArm` (unchanged by the `arm_*` naming
-> refactor — that was a package/directory rename, not a namespace rename).
+> **Terminology:** the package name is `arm`. C++ namespaces per component:
+> `DeltaArm` (kinematics library), `DeltaArmDriver` (driver lib) /
+> `DeltaArmDriverNode` (driver ROS node), `DeltaArmRos` (controller + manual),
+> `DeltaArmSim` (SFML sim).
 
 ## 2. Build & test
 
 This host (Windows) has **no ROS 2 toolchain** — only `g++ -std=c++17` is
 available for standalone library/validation checks. The full colcon build uses
-the Docker image.
+the Docker image (see `README.md`, `build_arm.sh`).
 
 ### Quick on-host library validation (no ROS)
 ```bash
 # arm kinematics library + IK skeleton
-g++ -std=c++17 -Isrc/arm_hardware/include -fsyntax-only src/arm_hardware/src/axis/delta-arm.cpp
+g++ -std=c++17 -Iinclude -fsyntax-only src/axis/delta-arm.cpp
 
 # motor-driver wrapper (needs FashionStar + CSerialPort include dirs)
 g++ -std=c++17 \
-  -Isrc/arm_hardware/include \
-  -Isrc/arm_hardware/motor_driver/fashionstart-uart-servo/include \
-  -Isrc/arm_hardware/motor_driver/fashionstart-uart-servo/dependency/CSerialPort/include \
-  -fsyntax-only src/arm_hardware/src/driver/motor_driver.cpp
+  -Iinclude \
+  -Imotor_driver/fashionstart-uart-servo/include \
+  -Imotor_driver/fashionstart-uart-servo/dependency/CSerialPort/include \
+  -fsyntax-only src/driver/motor_driver.cpp
 ```
 
 ### Full build (Docker / native ROS 2 Humble)
@@ -48,16 +53,19 @@ See `README.md → Building`.
 ## 3. Coding conventions
 
 - **Language standard:** C++17 (`CMAKE_CXX_STANDARD 17`).
-- **Namespace:** `DeltaArm` for the kinematics library classes (`Arm`, `Motor`, `Vec3`).
-- **Headers:** installed under `include/arm_hardware/` (package-style path), so
-  source files use `#include "arm_hardware/<header>.hpp"`.
+- **Namespaces:** `DeltaArm` for the kinematics library classes (`Arm`, `Motor`, `Vec3`);
+  `DeltaArmDriver`/`DeltaArmDriverNode`, `DeltaArmRos`, `DeltaArmSim` for the other nodes.
+- **Headers:** installed under `include/arm/` (package-style path), so source files
+  use `#include "arm/<header>.hpp"`.
 - **ROS style:** `rclcpp`/`rclcpp_action`, action server for `set_pos`,
   service for `emergency_stop` / `get_pos` / `motor_param_query`, topic for
   `motor_targets` and `pos`.
-- **Parameters:** namespaced per node in `src/arm_bringup/config/arm_params.yaml`
+- **Parameters:** namespaced per node in `config/arm_params.yaml`
   (`arm_controller`, `arm_motor_driver`, `arm_manual_control`).
-- **Naming:** executables target names match package+role
-  (`arm_system`, `arm_controller`, `arm_motor_driver`, `arm_manual`).
+- **Naming:** executables targets include `arm_system`, `arm_controller`,
+  `arm_motor_driver`, `arm_manual`, `arm_sim_sfml`; `arm_kinematics` is the
+  exported kinematics shared library (in the `arm` package, linked by the
+  gazebo sim).
 
 ## 4. What is intentionally a skeleton
 
@@ -77,3 +85,34 @@ math.
 3. If editing the driver: re-run the motor_driver syntax check (needs both
    FashionStar and CSerialPort include dirs).
 4. If editing interfaces: `ament_generate_interfaces` → bump nothing; just rebuild.
+
+## 6. Gazebo simulation (`gazebo/` = `arm_gazebo` package)
+
+The optional Gazebo sim lives in `gazebo/`, which is its **own ROS 2 package**
+named `arm_gazebo` (`package.xml`, `CMakeLists.txt`, `include/arm_gazebo/`,
+`src/`, `launch/`, `worlds/`, `urdf/`, `meshes/`, `config/`). It re-uses the
+delta-arm kinematics from `arm` instead of recompiling it.
+
+- The kinematics implementation lives in the `arm` package as the exported
+  shared library `arm_kinematics` (from `src/axis/delta-arm.cpp`), exported to
+  consumers as `arm::arm_kinematics`. `arm` installs its public headers, so an
+  external package can `find_package(arm REQUIRED)` and `target_link_libraries`
+  with `arm::arm_kinematics`.
+- `gazebo/` is **nested inside the `arm` package**, so colcon will not discover
+  it from the repo root (a `colcon build` here builds only `arm`). To build
+  `arm_gazebo`, stage the repo and `gazebo/` as **siblings** in a parent
+  workspace's `src/` (e.g. symlink `src/arm` → repo and `src/arm_gazebo` →
+  `gazebo/`), then `colcon build` there. `arm_gazebo` depends on `arm`, so
+  colcon orders it correctly.
+- `gazebo_ros` / `glm` are found via `find_package(... QUIET)` and the
+  `arm_sim_gazebo` executable is only built when they are present, so a
+  headless build of `arm` stays unaffected.
+
+### Verify the sibling build (Docker)
+```bash
+source /opt/ros/humble/setup.bash
+mkdir -p /tmp/ws/src
+ln -s <repo>         /tmp/ws/src/arm
+ln -s <repo>/gazebo  /tmp/ws/src/arm_gazebo
+cd /tmp/ws && colcon build --symlink-install
+```

@@ -2,8 +2,12 @@
 
 3 Degree of Freedom Delta Arm driven by FashionStar UART-servos.
 
-This repo is a **ROS 2 (C++) workspace** (colcon). The original monolithic
-`delta_arm` package has been split into a multi-package layout under `src/`.
+This repo is a **single ROS 2 (C++) package** named `arm`. The package root
+**is** the repo root (no `src/<pkg>` wrapper). When integrated into another
+project, the repo is mounted/copied into the container's `ros2_ws/src/arm`. An
+optional, independent Gazebo simulation package (`arm_gazebo`) lives under
+`gazebo/` and is built as a sibling (see below).
+
 For real hardware the controller and motor-driver nodes run in a **single
 process** (tight coupling between the ROS application and the serial-bus
 hardware); they can also be launched in **simulation** mode that runs only the
@@ -20,51 +24,40 @@ workspace/package):
 ## Workspace layout
 
 ```
-3DOF_DeltaArm/                     <-- Git Repository Root
+3DOF_DeltaArm/                     <-- Git Repository Root (= the `arm` package)
 ├── README.md
 ├── AGENT.md                          # Guide for AI agents (build/test/conventions)
 ├── .gitignore
 ├── .gitmodules                    # FashionStart UART servo SDK submodule
 ├── .ai/                             # Agent docs: ARCHITECTURE.md, CHANGELOGS.md
-├── arm_description/            # Package 1: URDF/meshes (model + frames)
+├── action/                          # SetPosition.action  (set_pos)
+├── msg/                             # ArmPosition.msg, MotorTargets.msg
+├── srv/                             # TogglePositionStream.srv, MotorParamQuery.srv, EmergencyStop.srv
+├── include/arm/                     # C++ headers (delta_arm, controller, manual, motor_driver)
+├── src/{axis,controller,driver,manual,sim,system}/   # node sources + kinematics
+├── launch/                          # delta_arm.launch, manual.launch, test.launch.py
+├── config/                          # arm_params.yaml (per-node parameters)
+├── test/                            # GTest unit tests (test_delta_arm.cpp)
+├── motor_driver/                    # FashionStart C++ SDK (git submodule) -> fsuartservo + cserialport
+├── gazebo/                          # SEPARATE package `arm_gazebo` (Gazebo sim)
 │   ├── package.xml
 │   ├── CMakeLists.txt
-│   ├── urdf/                      # robot description (Xacro/URDF)
-│   └── meshes/                    # STL/DAE visual & collision models
-├── arm_msgs/                   # Package 2: Custom ROS interfaces
-│   ├── package.xml
-│   ├── CMakeLists.txt
-│   ├── action/                    # SetPosition.action  (set_pos)
-│   ├── msg/                       # ArmPosition.msg, MotorTargets.msg
-│   └── srv/                       # TogglePositionStream.srv, MotorParamQuery.srv, EmergencyStop.srv
-├── arm_hardware/               # Package 3: Drivers & controllers (C++ library + nodes)
-│   ├── package.xml
-│   ├── CMakeLists.txt
-│   ├── include/arm_hardware/   # C++ headers (delta_arm, controller, manual, motor_driver)
-│   ├── src/                       # ros2_control/hardware interface + node mains
-│   ├── test/                     # GTest unit tests
-│   └── motor_driver/              # FashionStart C++ SDK (git submodule) -> builds fsuartservo + cserialport
-├── arm_bringup/                # Package 4: High-level launch + config
-│   ├── package.xml
-│   ├── CMakeLists.txt
-│   ├── config/                   # arm_params.yaml (per-node parameters)
-│   └── launch/                   # delta_arm.launch, manual.launch, test.launch.py
-├── arm_moveit_config/          # Package 5: MoveIt kinematics & motion planning
-│   ├── package.xml
-│   ├── CMakeLists.txt
-│   ├── config/                   # SRDF, joint_limits, kinematics.yaml
-│   └── launch/                   # MoveIt planning & execution launches
-└── Dockerfile                     # ROS 2 Humble build container (USB/serial for HW access)
+│   ├── include/arm_gazebo/
+│   ├── src/                         # arm_sim_gazebo node
+│   ├── launch/                      # arm_gazebo.launch
+│   ├── worlds/ urdf/ meshes/ config/
+└── Dockerfile                       # ROS 2 Humble build container (USB/serial for HW access)
 ```
 
-> The `arm_description`, `arm_moveit_config`, and the model-side of
-> `arm_bringup` packages are scaffolding (their `urdf/`, `meshes/`,
-> `config/`, and `launch/` dirs are `.gitkeep`-placeholdered). Fill them in as
-> the robot model + MoveIt side of the arm is added. The parts you actually use
-> today — `arm_msgs` (interfaces), `arm_hardware` (controller/driver/manual
-> nodes, library, tests, and the FashionStart submodule), and
-> `arm_bringup` (params + the three working launch files) — are fully
-> functional.
+> The kinematics implementation is built into the exported `arm_kinematics`
+> shared library (from `src/axis/delta-arm.cpp`), exposed to downstream
+> packages as `arm::arm_kinematics`. The `arm_gazebo` package re-uses it rather
+> than recompiling the IK.
+>
+> `gazebo/` is a package **nested inside** the `arm` package, so colcon does not
+> discover it from the repo root. To build it, stage `arm` and `gazebo/` as
+> **siblings** in a parent workspace's `src/` (e.g. symlink `src/arm` → repo,
+> `src/arm_gazebo` → `gazebo/`), then `colcon build`. See `AGENT.md §6`.
 
 ## ROS interfaces (`arm`)
 
@@ -154,6 +147,21 @@ docker run --rm -it `
   arm:latest bash -c "source /opt/ros/humble/setup.bash && colcon build --symlink-install && source install/setup.bash"
 ```
 
+> The repo root **is** the `arm` package, so the above builds only `arm`. To
+> also build the separate `arm_gazebo` (Gazebo sim) package, stage `arm` and
+> `gazebo/` as siblings under a parent `src/`:
+>
+> ```bash
+> source /opt/ros/humble/setup.bash
+> mkdir -p /tmp/ws/src
+> ln -s <repo>        /tmp/ws/src/arm
+> ln -s <repo>/gazebo /tmp/ws/src/arm_gazebo
+> cd /tmp/ws && colcon build --symlink-install
+> ```
+>
+> `arm_gazebo` depends on `arm`, so colcon builds `arm` first and `arm_gazebo`
+> links the exported `arm::arm_kinematics` library. (See `AGENT.md §6`.)
+
 ## Launch options — quick reference menu
 
 Everything below runs **inside the container** after
@@ -168,7 +176,7 @@ docker run --rm -it --device /dev/ttyUSB0 --group-add 20 `
 
 | Purpose                                | Command                                                        |
 |----------------------------------------|----------------------------------------------------------------|
-| **Motor driver alone** (bus-servo HW)  | `ros2 run arm arm_motor_driver --ros-args --params-file src/arm/config/arm_params.yaml` |
+| **Motor driver alone** (bus-servo HW)  | `ros2 run arm arm_motor_driver --ros-args --params-file config/arm_params.yaml` |
 | **Controller only** (sim/external drv) | `ros2 launch arm delta_arm.launch simulation:=true`            |
 | **Full system** (controller+driver HW) | `ros2 launch arm delta_arm.launch`                             |
 | **Manual WASD jog** (sim)              | `ros2 launch arm manual.launch`                                |
@@ -211,6 +219,21 @@ driver is **not** run — the arm simulation is provided externally over the
 same topic/service/action names (`arm/set_pos`, `arm/motor_targets`, `arm/pos`,
 `arm/get_pos`). Because the interface is identical, the controller code needs no
 changes between simulation and hardware.
+
+### Gazebo simulation (`arm_gazebo`)
+
+The optional 3D Gazebo sim is a separate package (`.ai` `/gazebo` =
+`arm_gazebo`, see `AGENT.md §6`). It provides the simulation-side model that
+fills in for the motor driver when the controller runs in `simulation:=true`.
+Launch it (after building as a sibling) with:
+
+```bash
+ros2 launch arm_gazebo arm_gazebo.launch
+```
+
+The sim node subscribes `arm/target_position` and publishes
+`arm/current_position`, and re-uses the delta-arm IK via the exported
+`arm::arm_kinematics` library.
 
 ### Example: drive the end-effector
 
@@ -270,7 +293,7 @@ ros2 run arm arm_manual --ros-args \
 
 ## Where to implement the math
 
-The inverse kinematics lives in `src/arm/src/axis/delta-arm.cpp`:
+The inverse kinematics lives in `src/axis/delta-arm.cpp`:
 
 * `Arm::ik_stage1(const Vec3 &)` — task-space target → per-limb plane orientation.
 * `Arm::ik_stage2(float theta, int leg)` — limb plane orientation → motor angle.

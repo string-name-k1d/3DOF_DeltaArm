@@ -18,11 +18,24 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions & options)
   const int baudrate = get_parameter("baudrate").as_int();
   const auto servo_ids = get_parameter("servo_ids").as_integer_array();
   const bool auto_init = get_parameter("auto_init").as_bool();
+  const auto angle_min = get_parameter("angle_min").as_double_array();
+  const auto angle_max = get_parameter("angle_max").as_double_array();
+  const auto start_angles = get_parameter("start_angles").as_double_array();
+  const double max_speed = get_parameter("max_speed").as_double();
 
   int ids[3] = {0, 0, 0};
   for (size_t i = 0; i < servo_ids.size() && i < 3; ++i) ids[i] = static_cast<int>(servo_ids[i]);
 
-  driver_ = std::make_shared<DeltaArmDriver::MotorDriver>(port, baudrate, ids);
+  DeltaArmDriver::MotorConfig config;
+  for (size_t i = 0; i < 3; ++i) {
+    config.angle_min[i] = (i < angle_min.size()) ? static_cast<float>(angle_min[i]) : 0.0f;
+    config.angle_max[i] = (i < angle_max.size()) ? static_cast<float>(angle_max[i]) : 145.0f;
+    config.install_offset[i] = (i < start_angles.size())
+                                 ? static_cast<float>(start_angles[i]) : 0.0f;
+  }
+  config.max_speed = static_cast<float>(max_speed);
+
+  driver_ = std::make_shared<DeltaArmDriver::MotorDriver>(port, baudrate, ids, config);
 
   if (auto_init) {
     if (driver_->init()) {
@@ -66,7 +79,15 @@ void MotorDriverNode::declareParams()
   declare_parameter<std::string>("port_name", "/dev/ttyUSB0");
   declare_parameter<int>("baudrate", 115200);
   declare_parameter<std::vector<int64_t>>("servo_ids", {0, 1, 2});
+  // Installation offset (deg) per motor: the physical servo angle when the
+  // joint is at the arm's zero/home pose. Used to map joint-space commands
+  // to physical servo angles and read-backs back to joint space.
   declare_parameter<std::vector<double>>("start_angles", {0.0, 0.0, 0.0});
+  // Physical position limits (deg): 0 = fully extended, 145 = most retracted.
+  declare_parameter<std::vector<double>>("angle_min", {0.0, 0.0, 0.0});
+  declare_parameter<std::vector<double>>("angle_max", {145.0, 145.0, 145.0});
+  // Velocity limit (deg/s) used for the on-servo trajectory profiling.
+  declare_parameter<double>("max_speed", 100.0);
   declare_parameter<bool>("auto_init", true);
   declare_parameter<double>("feedback_rate", 10.0);
   declare_parameter<std::string>("feedback_frame", "base_link");

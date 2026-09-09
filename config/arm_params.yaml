@@ -24,8 +24,19 @@ arm_motor_driver:
     baudrate: 115200
     # Binary ids of the three delta-arm actuators.
     servo_ids: [0, 1, 2]
-    # Calibrated zero/home joint angles (deg), one per motor.
+    # Installation offset (deg) per motor: the physical servo angle when the
+    # joint sits at the arm's zero/home pose. A commanded joint angle is sent
+    # as joint + start_angles, so start_angles IS the per-motor installation
+    # offset of the servos.
     start_angles: [0.0, 0.0, 0.0]
+    # Physical position limits (deg) per motor. Control outputs are clamped into
+    # this range before they reach the servo: 0 = limb fully extended (away from
+    # the centre), 145 = most retracted.
+    angle_min: [0.0, 0.0, 0.0]
+    angle_max: [145.0, 145.0, 145.0]
+    # Velocity limit (deg/s) used by the servo's trajectory profiling when it
+    # interpolates between the current and the commanded angle.
+    max_speed: 100.0
     # Whether the driver should ping + sync servos at startup.
     auto_init: true
 

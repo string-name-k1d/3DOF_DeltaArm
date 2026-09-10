@@ -1,0 +1,17 @@
+# Simulation override for the arm container.
+#
+# Clears the hardware-only bits configured in compose.yaml (USB serial binding,
+# dialout group) and launches the controller only (arm_controller) via the
+# run_arm.sh entrypoint; the arm simulation is provided externally (e.g. the
+# arm_gazebo package).
+#
+# Compose override files append sequence values (devices/group_add), so the
+# base values are removed explicitly with the !reset merge keyword.
+#
+#   docker compose -f compose.yaml -f compose.sim.yaml run --rm arm
+
+services:
+  arm:
+    devices: !reset []
+    group_add: !reset []
+    command: ["simulation"]

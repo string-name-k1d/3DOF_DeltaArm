@@ -67,25 +67,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Initialize rosdep for workspace dependency management
 RUN rosdep init && rosdep update
 
-# Create a non-root user and add them to dialout/plugdev groups for USB access
-ARG USERNAME=rosuser
-ARG USER_UID=1000
-ARG USER_GID=$USER_UID
+# Run as root (no dedicated user); automatically source ROS 2 in interactive shells.
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
 
-RUN groupadd --gid $USER_GID $USERNAME \
-    && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
-    # Add user to dialout and plugdev groups to access /dev/ttyUSB*, /dev/ttyACM*, etc.
-    && usermod -aG dialout,plugdev $USERNAME \
-    # Grant sudo permissions for dev convenience
-    && apt-get update && apt-get install -y sudo \
-    && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /root
 
-# Automatically source ROS 2 environment for the user
-RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /home/${USERNAME}/.bashrc
+# Container launcher (see run_arm.sh):
+#   * real hardware by default (arm_system = controller + motor driver)
+#   * "simulation" as the first argument runs the controller only
+#   * any other argument(s) are executed as a shell command (dev shell/build)
+COPY run_arm.sh /root/run_arm.sh
+RUN chmod +x /root/run_arm.sh
 
-USER $USERNAME
-WORKDIR /home/${USERNAME}
-
-# Default entrypoint starts a bash shell
-CMD ["/bin/bash"]
+ENTRYPOINT ["/root/run_arm.sh"]
+CMD []

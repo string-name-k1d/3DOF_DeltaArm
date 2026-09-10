@@ -58,13 +58,16 @@ workspace/package).
 ├── config/                          # arm_params.yaml (per-node parameters)
 ├── test/                            # GTest unit tests (test_delta_arm.cpp)
 ├── motor_driver/                    # FashionStart C++ SDK (git submodule) -> fsuartservo + cserialport
+├── run_arm.sh                       # container launcher (HW default; "simulation" arg; dev shell)
+├── compose.yaml                     # docker compose defaults (root container, HW config, TTY)
+├── compose.sim.yaml                 # simulation override (clears HW bits, runs controller only)
 ├── gazebo/                          # SEPARATE package `arm_gazebo` (Gazebo sim)
 │   ├── package.xml
 │   ├── CMakeLists.txt
-│   ├── include/arm_gazebo/
-│   ├── src/                         # arm_sim_gazebo node
-│   ├── launch/                      # arm_gazebo.launch
-│   ├── worlds/ urdf/ meshes/ config/
+│   ├── src/                         # delta_arm_gazebo_plugin (model plugin)
+│   ├── launch/                      # arm_gazebo.launch.py (sim + optional WASD)
+│   ├── worlds/                      # delta_arm.world
+│   └── config/
 └── Dockerfile                       # ROS 2 Humble build container (USB/serial for HW access)
 ```
 
@@ -99,15 +102,23 @@ with `usbipd`.
 cd C:\Users\admin\Programs\Fyp\3DOF_DeltaArm
 git submodule update --init --recursive    # FashionStart SDK
 docker build -t arm:latest .
+# or, using the compose defaults in compose.yaml:
+docker compose build arm
 ```
+
+> **`compose.yaml`** bakes in the always-needed `docker run` arguments (the
+> container runs as **root**, the repo is mounted at `/root/ws`, interactive
+> TTY) plus the hardware configuration (**USB serial binding** and **dialout
+> group**), so no ad-hoc CLI flags are needed. The default launch is the **real
+> hardware** arm; the pure-simulation launch requires the extra
+> `-f compose.sim.yaml` override file (see [5. Launch](#5-launch)).
 
 ### Build the package (colcon) inside the container
 
 ```bash
-# From the repo root (PowerShell), the workspace is mounted at /home/rosuser/ws:
-docker run --rm -it `
-  -v "${PWD}:/home/rosuser/ws" -w /home/rosuser/ws `
-  arm:latest bash -c "source /opt/ros/humble/setup.bash && colcon build --symlink-install && source install/setup.bash"
+# From the repo root (PowerShell), the workspace is mounted at /root/ws:
+docker compose run --rm arm bash -lc \
+  "source /opt/ros/humble/setup.bash && colcon build --symlink-install && source install/setup.bash"
 ```
 
 > The repo root **is** the `arm` package, so the above builds only `arm`. To
@@ -244,14 +255,29 @@ below.
 ## 5. Launch
 
 Everything below runs **inside the container** after
-`source install/setup.bash` (see [2. Setup](#2-setup)). The container
-must be started with the serial device when hardware is attached:
+`source install/setup.bash` (see [2. Setup](#2-setup)). Start the container
+with the compose defaults. The default launch is the **real hardware** arm;
+simulation requires the extra `-f compose.sim.yaml` flag:
 
 ```bash
-# Hardware container (pass the serial port + dialout group):
-docker run --rm -it --device /dev/ttyUSB0 --group-add 20 `
-  -v "${PWD}:/home/rosuser/ws" -w /home/rosuser/ws arm:latest bash
+# Real hardware (default) - controller + motor driver; USB serial and dialout
+# group are already configured in compose.yaml:
+docker compose run --rm arm
+
+# Simulation - controller only (arm sim provided externally), no serial config:
+docker compose -f compose.yaml -f compose.sim.yaml run --rm arm
+
+# Interactive shell / build inside the repo-mounted workspace:
+docker compose run --rm arm bash
 ```
+
+> On a host without the serial adapter attached, `compose.yaml` cannot bind
+> `/dev/ttyUSB0` — use the simulation override for shells/builds too:
+> `docker compose -f compose.yaml -f compose.sim.yaml run --rm arm bash`.
+>
+> The USB serial path is configurable without touching the docker files:
+> `SERIAL_DEVICE=/dev/ttyUSB1 docker compose run --rm arm` (default
+> `/dev/ttyUSB0`).
 
 | Purpose                                | Command                                                        |
 |----------------------------------------|----------------------------------------------------------------|
@@ -378,16 +404,39 @@ ros2 run arm arm_manual --ros-args \
 
 The optional 3D Gazebo sim is a **separate package** under `gazebo/` (see
 `AGENT.md §6`). It provides the simulation-side model that fills in for the
-motor driver when the controller runs in `simulation:=true`. Launch it (after
-building as a sibling) with:
+motor driver when the controller runs in `simulation:=true`.
+
+The sim is a **model plugin** (`delta_arm_gazebo_plugin` in
+`worlds/delta_arm.world`): a closed-loop delta-arm model whose shoulder joints
+are servoed by a PD+I torque controller on the upper-arm links. It subscribes
+the controller's `arm/motor_targets` (degrees) and is verified to track the
+commanded angles to well under a degree. Because a Gazebo/ODE loop joint rejects
+kinematic `SetPosition`, the plugin drives the mechanism with body torques
+instead (`AddRelativeTorque`); gains are SDF-configurable (`kp`/`ki`/`kd`/
+`tau_max`).
+
+Launch it (after building `arm` and `arm_gazebo` as siblings) with:
 
 ```bash
-ros2 launch arm_gazebo arm_gazebo.launch
+ros2 launch arm_gazebo arm_gazebo.launch.py                     # headless
+ros2 launch arm_gazebo arm_gazebo.launch.py gui:=true           # + Gzclient GUI
+ros2 launch arm_gazebo arm_gazebo.launch.py manual:=true        # + WASD terminal
 ```
 
-The sim node subscribes `arm/target_position` and publishes
-`arm/current_position`, and re-uses the delta-arm IK via the exported
-`arm::arm_kinematics` library.
+`manual:=true` also starts the `arm_manual` WASD node, so you can jog the
+simulated end-effector from the launching terminal:
+
+```
+W/S : +/- z    A/D : +/- y     Q : quit
+```
+
+The controller can also run standalone with the sim, or be replaced by the
+WASD jog entirely:
+
+```bash
+ros2 launch arm delta_arm.launch simulation:=true   # controller only
+ros2 launch arm manual.launch                       # controller + WASD (no sim)
+```
 
 ## 7. Inverse Kinematics
 

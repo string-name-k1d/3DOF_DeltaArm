@@ -1,0 +1,46 @@
+# Defaults for the arm container (Docker Compose).
+#
+# The container runs as root, with the repo mounted at /root/ws (the repo root
+# IS the `arm` package) and an interactive TTY. The default launch command is
+# the REAL HARDWARE arm (controller + motor driver); see run_arm.sh.
+#
+# Hardware-only configuration is kept in the docker files instead of ad-hoc
+# CLI flags: the USB serial adapter binding and the dialout group live here,
+# and the pure-simulation build clears them (compose files replace possibly
+# overridden values, so the sim override sets them back to empty):
+#
+#   Real hardware (default):
+#     docker compose run --rm arm
+#
+#   Simulation (controller only; extra -f flag required):
+#     docker compose -f compose.yaml -f compose.sim.yaml run --rm arm
+#
+# Device path override: SERIAL_DEVICE=/dev/ttyUSB1 docker compose run ...
+#
+# Note: the repo root IS the `arm` package, so /root/ws is the package root.
+# To also build the sibling `arm_gazebo` package stage them under a parent
+# src/ (see README "Build the package (colcon) inside the container").
+
+services:
+  arm:
+    image: arm:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    working_dir: /root/ws
+
+    stdin_open: true
+    tty: true
+
+    volumes:
+      - .:/root/ws
+
+    # USB serial adapter for the FashionStar bus-servos (host:container).
+    devices:
+      - "${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0"
+
+    # dialout group: the group owning serial devices (matters if the process
+    # UID is not root; running as root, access is granted regardless).
+    group_add:
+      - "20"

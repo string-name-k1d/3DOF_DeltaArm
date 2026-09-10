@@ -20,6 +20,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(glm QUIET)
+find_package(gazebo REQUIRED)
 find_package(gazebo_ros QUIET)
 
 # The arm package exposes the delta-arm kinematics (DeltaArm::Arm) that the
@@ -54,11 +55,48 @@ if(gazebo_ros_FOUND AND glm_FOUND
 endif()
 
 # ---------------------------------------------------------------------------
+# delta_arm_gazebo_plugin - Gazebo (Classic) model plugin
+#
+# Loaded by the delta_arm model in worlds/delta_arm.world. Subscribes to the
+# arm controller's arm/motor_targets (degrees) and servoes the three shoulder
+# revolute joints. Requires gazebo_ros for the shared ROS node.
+# ---------------------------------------------------------------------------
+if(gazebo_ros_FOUND
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/delta_arm_gazebo_plugin.cpp")
+  add_library(delta_arm_gazebo_plugin SHARED
+    src/delta_arm_gazebo_plugin.cpp
+  )
+  target_include_directories(delta_arm_gazebo_plugin PRIVATE
+    ${GAZEBO_INCLUDE_DIRS}
+    ${gazebo_ros_INCLUDE_DIRS}
+  )
+  ament_target_dependencies(delta_arm_gazebo_plugin
+    rclcpp
+    arm
+  )
+  target_link_libraries(delta_arm_gazebo_plugin
+    ${gazebo_ros_LIBRARIES}
+    ${GAZEBO_LIBRARIES}
+    arm::arm__rosidl_typesupport_cpp
+  )
+  set_target_properties(delta_arm_gazebo_plugin PROPERTIES
+    BUILD_RPATH_USE_ORIGIN TRUE
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+  )
+endif()
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
 if(TARGET arm_sim_gazebo)
   install(TARGETS arm_sim_gazebo
     RUNTIME DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
+
+if(TARGET delta_arm_gazebo_plugin)
+  install(TARGETS delta_arm_gazebo_plugin
+    LIBRARY DESTINATION lib
   )
 endif()
 

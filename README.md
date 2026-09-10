@@ -1,4 +1,4 @@
-# arm — 3DOF Delta Arm (ROS 2 package)
+# 3DOF Delta Arm (ROS 2 package)
 
 3 Degree of Freedom Delta Arm driven by FashionStar UART-servos.
 
@@ -16,29 +16,17 @@ workspace/package).
 
 ## Content Overview
 
-| Topic | Where |
-|---|---|
-| Prerequisites (serial / tooling) | [1. Prerequisites](#1-prerequisites) |
-| Workspace layout, submodule, build | [2. Setup](#2-setup) |
-| Parameter files & motor limits | [3. Configurations](#3-configurations) |
-| Nodes & ROS interfaces | [4. ROS Components](#4-ros-components) |
-| Launch commands (HW / sim / tests) | [5. Launch](#5-launch) |
-| Jogging (WASD), actions, driving poses | [6. Controls](#6-controls) |
-| Gazebo standalone sim | [Component: Gazebo Simulation](#component-gazebo-simulation-arm_gazebo) |
-| Where to implement the IK math | [7. Inverse Kinematics](#7-inverse-kinematics) |
-| External references | [8. References](#8-references) |
-
-| Table of Contents |
-| :--- |
-| [1. Prerequisites](#1-prerequisites) |
-| [2. Setup](#2-setup) |
-| [3. Configurations](#3-configurations) |
-| [4. ROS Components](#4-ros-components) |
-| [5. Launch](#5-launch) |
-| [6. Controls](#6-controls) |
-| [Component: Gazebo Simulation](#component-gazebo-simulation-arm_gazebo) |
-| [7. Inverse Kinematics](#7-inverse-kinematics) |
-| [8. References](#8-references) |
+| Table of Contents |  |
+| :--- | :--- |
+| [1. Prerequisites](#1-prerequisites) | Prerequisites (serial / tooling) |
+| [2. Setup](#2-setup) | Workspace layout, submodule, build |
+| [3. Configurations](#3-configurations) | Parameter files & motor limits |
+| [4. ROS Components](#4-ros-components) | Nodes & ROS interfaces |
+| [5. Launch](#5-launch) | Launch commands (HW / sim / tests) |
+| [6. Controls](#6-controls) | Jogging (WASD), actions, driving poses |
+| [Component: Gazebo Simulation](#component-gazebo-simulation-arm_gazebo) | Gazebo standalone sim |
+| [7. Inverse Kinematics](#7-inverse-kinematics) | Where to implement the IK math |
+| [8. References](#8-references) | External references |
 
 ## 1. Prerequisites
 

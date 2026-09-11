@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <functional>
+#include <vector>
 
 namespace DeltaArmRos
 {
@@ -11,7 +12,8 @@ DeltaArmControllerNode::DeltaArmControllerNode(const rclcpp::NodeOptions & optio
     feedback_rate_(20.0),
     feedback_frame_("base_link"),
     streaming_(false),
-    estop_active_(false)
+    estop_active_(false),
+    simulate_arrival_(true)
 {
   declareParams();
   setupActionServer();
@@ -30,6 +32,65 @@ void DeltaArmControllerNode::declareParams()
 {
   feedback_rate_ = declare_parameter<double>("feedback_rate", 20.0);
   feedback_frame_ = declare_parameter<std::string>("feedback_frame", "base_link");
+
+  // Mechanism geometry (mm) - shared with the visualisers via arm_params.yaml.
+  const double base_radius =
+    declare_parameter<double>("geometry.base_radius", 150.0);
+  const double platform_radius =
+    declare_parameter<double>("geometry.platform_radius", 60.0);
+  const double upper_arm_len =
+    declare_parameter<double>("geometry.upper_arm_len", 160.0);
+  const double lower_arm_len =
+    declare_parameter<double>("geometry.lower_arm_len", 320.0);
+
+  // Visual-only servo-linkage parameters (the controller does not use them;
+  // declared so the shared geometry block loads without "not declared"
+  // warnings). Mechanism per arm: servo shaft -> upper rod (single bar)
+  // -> lower rod (single bar) -> upper arm at a fixed distance from the base
+  // joint (arm_attach_dist). The lower arm (elbow->platform) is drawn as 2
+  // parallel bars separated by rod_spread.
+  declare_parameter<double>("geometry.servo_radius", 150.0);
+  declare_parameter<double>("geometry.servo_z", -25.0);
+  declare_parameter<double>("geometry.upper_rod_len", 60.0);
+  declare_parameter<double>("geometry.arm_attach_dist", 30.0);
+  declare_parameter<double>("geometry.rod_spread", 8.0);
+
+  simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
+  const auto initial = declare_parameter<std::vector<double>>("sim.initial_pos", std::vector<double>{0.0, 0.0, -0.30});
+
+  std::vector<DeltaArm::ArmMechConfig> configs;
+  constexpr double kTwoPiOver3 = 2.0943951023931953;  // 120 deg
+  for (int leg = 0; leg < 3; ++leg) {
+    DeltaArm::ArmMechConfig c;
+    c.base_radius = static_cast<float>(base_radius);
+    c.platform_radius = static_cast<float>(platform_radius);
+    c.upper_arm_len = static_cast<float>(upper_arm_len);
+    c.lower_arm_len = static_cast<float>(lower_arm_len);
+    c.plane_angle = static_cast<float>(leg * kTwoPiOver3);
+    c.home_offset = 0.0f;
+    configs.push_back(c);
+  }
+  arm_.set_geometry(configs);
+
+  // Start the arm at a valid (IK-reachable) posture instead of the degenerate
+  // (0,0,0). The commanded pose becomes the streamed pose in sim mode.
+  if (initial.size() == 3) {
+    const float ix = static_cast<float>(initial[0]);
+    const float iy = static_cast<float>(initial[1]);
+    const float iz = static_cast<float>(initial[2]);
+    arm_.set_tar_pos(ix, iy, iz);
+    if (simulate_arrival_) arm_.apply();
+    float init_deg[3] = {0.0f, 0.0f, 0.0f};
+    arm_.get_motor_current(init_deg);
+    RCLCPP_INFO(get_logger(),
+                "initial pose -> (%.3f, %.3f, %.3f) m, motors %.2f / %.2f / %.2f deg",
+                ix, iy, iz, init_deg[0], init_deg[1], init_deg[2]);
+  }
+
+  RCLCPP_INFO(get_logger(),
+              "geometry: base_radius=%.1f platform_radius=%.1f "
+              "upper_arm_len=%.1f lower_arm_len=%.1f",
+              base_radius, platform_radius, upper_arm_len, lower_arm_len);
 }
 
 void DeltaArmControllerNode::setupActionServer()
@@ -143,6 +204,11 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
   float angles[3] = {0.0f, 0.0f, 0.0f};
   arm_.get_motor_targets(angles);
   publishTargets(angles);
+
+  // Sim mode: there is no motor driver to close the loop, so promote the
+  // commanded target to the current pose immediately. The arm/pos stream then
+  // reflects the requested pose and the visualiser can draw the motion.
+  if (simulate_arrival_) arm_.apply();
 
   // Feedback: current end-effector estimate (skeleton: streamed estimate).
   auto feedback = std::make_shared<SetPosition::Feedback>();

@@ -15,6 +15,82 @@ arm_controller:
     # Coordinate frame attached to the published ArmPosition messages.
     feedback_frame: "base_link"
 
+# ============================================================================
+# Shared delta-arm mechanism geometry (millimetres).
+#
+# The "geometry" parameters are read by BOTH the controller (kinematics) and
+# the 2-D SFML visualiser (rendering). The "/**" glob makes them visible to
+# every node started from this file.
+#
+# * base_radius   : circumradius of the equilateral triangle through the three
+#                   SERVO pivots (the base-plate vertices). servo_radius defaults
+#                   to this value when not set.
+# * platform_radius: circumradius of the equilateral triangle through the three
+#                   lower-rod end joints on the effector platform.
+# * upper_arm_len : arm actuation joint -> elbow  (the "upper arm", rf)
+# * lower_arm_len : elbow -> platform joint  (the "lower rod", re)
+#
+# Each arm is driven by its own servo at a base-plate vertex. Servo linkage
+# (visual):  servo shaft -> "upper" rod (single bar)
+#                          -> "lower" rod (single bar)
+#                          -> the upper arm, at a point at fixed distance from
+#                             the base (actuation) joint.
+# The LOWER ARM (elbow -> platform joint) is drawn as 2 PARALLEL bars.
+# upper_rod_len / arm_attach_dist / rod_spread only shape the visualiser's
+# servo-linkage rendering.
+#
+# motor_positions / platform_offsets are optional explicit joint positions in
+# the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2]. When
+# absent they are derived from the two radii: an equilateral set spaced 120 deg
+# apart, matching the delta-arm FK / Gazebo model. The effector triangle is
+# INVERTED (apex-down): each platform joint sits on the SAME radial as its
+# motor, which is the orientation the IK/FK solve for. The derived values for
+# the default radii above are:
+#   arm actuation joints: (0,-45,0)  (38.97,22.5,0)  (-38.97,22.5,0)
+#   platform joints:      (0,-60,0)  (51.96,30,0)    (-51.96,30,0)
+#   servo pivots:         (0,-150,25) (129.9,75,25)   (-129.9,75,25)
+# To override them, uncomment and edit:
+#   motor_positions: [0.0, -45.0, 0.0,  38.97, 22.5, 0.0,  -38.97, 22.5, 0.0]
+#   platform_offsets: [0.0, -60.0, 0.0,  51.96, 30.0, 0.0,  -51.96, 30.0, 0.0]
+# ============================================================================
+/**:
+  ros__parameters:
+    geometry:
+      base_radius: 150.0
+      platform_radius: 60.0
+      upper_arm_len: 160.0
+      lower_arm_len: 320.0
+
+      # Visual-only servo-linkage parameters (visualiser). Mechanism per arm:
+      #   servo shaft -> rod "upper"   (a SINGLE bar fixed on the shaft)
+      #               -> rod "lower"   (a SINGLE bar)
+      #               -> the upper arm, at a point at FIXED distance from the
+      #                  base (actuation) joint.
+      # The LOWER ARM (elbow -> platform joint) is drawn as 2 PARALLEL bars.
+      # servo_radius is the circumradius of the servo output shafts; it
+      # defaults to base_radius. The servos are mounted UNDER the base plate,
+      # so servo_z < 0 puts the whole linkage below the plate, up to the arm's
+      # attach point. upper_rod_len is the length of the upper rod (it points
+      # inward to the hub). arm_attach_dist is the fixed distance from the
+      # arm's base joint to the lower-rod attach point, measured along the
+      # arm. rod_spread is the lateral separation of the two parallel bars of
+      # each lower arm.
+      servo_radius: 150.0
+      servo_z: -25.0
+      upper_rod_len: 60.0
+      arm_attach_dist: 30.0
+      rod_spread: 8.0
+
+    # Simulation behaviour (shared by controller + visualiser):
+    #   initial_pos:      the arm's start posture (meters). Must be IK-reachable
+    #                     (the controller commands it on startup, so the arm
+    #                     never begins at the degenerate (0,0,0)).
+    #   simulate_arrival: in sim mode the controller promotes each set_pos goal
+    #                     to the current pose immediately (no motor driver).
+    sim:
+      initial_pos: [0.0, 0.0, -0.30]
+      simulate_arrival: true
+
 arm_motor_driver:
   ros__parameters:
     # UART/serial port of the FashionStar bus-servo adapter.

@@ -2,12 +2,13 @@
 #define arm__ARM_SIM_SFML_HPP_
 
 #include <memory>
-#include <vector>
 
-#include "geometry_msgs/msg/point.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp_action/rclcpp_action.hpp"
 
-#include "arm/delta_arm.hpp"
+#include "arm/action/set_position.hpp"
+#include "arm/msg/arm_position.hpp"
+#include "arm/srv/toggle_position_stream.hpp"
 
 namespace DeltaArmSim
 {
@@ -15,48 +16,58 @@ namespace DeltaArmSim
 /**
  * @brief 2-D graphical (SFML) delta-arm simulator.
  *
- * Runs the same inverse kinematics as the real arm (DeltaArm::Arm), drives a
- * smooth Cartesian trajectory toward the commanded target, and visualises the
- * mechanism with SFML. This node deliberately uses the SAME interface as the
- * hardware/controller so the arm can be driven identically in sim and reality:
+ * Presents a live, self-contained view of the arm and forwards user targets to
+ * the arm controller *exactly* like the manual-control node does:
  *
- *  * subscribes "arm/target_position" (geometry_msgs/Point) - the target;
- *  * publishes "arm/current_position" (geometry_msgs/Point) - the current
- *    end-effector position for feedback/monitoring.
+ *  * action-client to "arm/set_pos"  : forwards commanded targets;
+ *  * subscribes "arm/pos"             : current position + motor angles;
+ *  * enables "arm/get_pos" streaming  : so "arm/pos" is published.
  *
- * The full 3-DOF (x, y, z) arm is handled by the arm_ geometry; the SFML view
- * shows a side projection and the three limbs.
+ * The SFML renderer shows two simultaneous projections of the arm from the
+ * live motor angles:
+ *
+ *  * top view   - the arm as seen looking down the base's vertical axis: the
+ *                 three limbs project onto the XY plane;
+ *  * side view  - the arm as seen looking along the Y axis: the XZ projection
+ *                 of two representative limbs (upper arm + lower
+ *                 parallelogram rod + end-effector platform), which shows the
+ *                 full "side" of a delta arm.
+ *
+ * Both projections share a common pixel scale so movement looks consistent.
  */
 class ArmSimSFMLNode : public rclcpp::Node
 {
 public:
+  using SetPosition = arm::action::SetPosition;
+  using GoalHandle = rclcpp_action::ClientGoalHandle<SetPosition>;
+
   explicit ArmSimSFMLNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
-  /// @brief Latest end-effector position on screen (world units, pixels).
-  float cur_x() const { return cur_x_; }
-  float cur_y() const { return cur_y_; }
+  /// @brief Send a target; replaces any in-flight goal (mirrors the manual node).
+  void send_target(double x, double y, double z);
 
-  /// @brief The three servo angles (degrees) for a limb-based rendering.
-  const std::vector<float> & servo_angles() const { return servo_angles_; }
+  /// @brief Ask the controller for continuous "arm/pos" publishing.
+  void enable_position_streaming();
 
-  /// @brief Advance the simulated motion by one step (called each frame).
-  void step(double dt);
+  /// Latest end-effector position (m) from the controller stream.
+  double pos_x_ = 0.0;
+  double pos_y_ = 0.0;
+  double pos_z_ = 0.0;
+
+  /// Latest motor angles (degrees) from the controller stream.
+  float ang_[3] = {0.0f, 0.0f, 0.0f};
+
+  /// Whether streamed position feedback has arrived at least once.
+  bool got_pos_ = false;
 
 private:
-  void onTarget(const geometry_msgs::msg::Point::SharedPtr msg);
+  void onPosition(const arm::msg::ArmPosition::SharedPtr msg);
 
-  DeltaArm::Arm arm_;
+  rclcpp_action::Client<SetPosition>::SharedPtr action_client_;
+  rclcpp::Subscription<arm::msg::ArmPosition>::SharedPtr pos_sub_;
+  rclcpp::Client<arm::srv::TogglePositionStream>::SharedPtr toggle_client_;
 
-  float sim_x_, sim_y_, sim_z_;      // current end-effector (metres)
-  float tar_x_, tar_y_, tar_z_;      // commanded target (metres)
-  float move_speed_;                 // Cartesian speed (m/s)
-  std::vector<float> servo_angles_;  // degrees, one per motor
-
-  float cur_x_, cur_y_;              // screen-space current position
-
-  rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr cur_pub_;
-  rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr tar_sub_;
-  rclcpp::TimerBase::SharedPtr timer_;
+  bool streaming_ = false;
 };
 
 }  // namespace DeltaArmSim

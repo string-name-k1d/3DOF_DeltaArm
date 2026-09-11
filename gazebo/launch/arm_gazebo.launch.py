@@ -1,12 +1,17 @@
 """Gazebo (Classic) simulation of the 3DOF delta arm.
 
 Launches:
-  * gzserver with the delta_arm.world model (the DeltaArmGazeboPlugin inside
-    the model subscribes to arm/motor_targets and drives the shoulder joints).
+  * the world SDF generated at runtime from the xacro descriptor
+    urdf/delta_arm.world.xacro (the DeltaArmGazeboPlugin inside the model
+    subscribes to arm/motor_targets and drives the shoulder joints).
   * the arm controller (simulation mode - no motor driver), which exposes the
     set_pos action / get_pos streaming on the standard /arm topics.
   * optionally the WASD manual-control node ('manual:=true') so the simulated
     arm can be jogged from the keyboard in the launching terminal.
+
+The world xacro is built with the SAME mechanism parameters and maths as the
+2-D simulator (values in config/arm_params.yaml under "geometry"): edit that
+file to change link lengths, then re-run xacro + gzserver.
 
 Usage:
     ros2 launch arm_gazebo arm_gazebo.launch.py                     (headless)
@@ -15,10 +20,12 @@ Usage:
 """
 
 import os
+import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.actions import ExecuteProcess
 from launch.actions import IncludeLaunchDescription
 from launch.actions import SetEnvironmentVariable
 from launch.conditions import IfCondition
@@ -41,7 +48,10 @@ def generate_launch_description():
     # our plugin library discoverable before the server is started.
     os.environ['GAZEBO_PLUGIN_PATH'] = plugin_path
 
-    world = os.path.join(arm_gazebo_share, 'worlds', 'delta_arm.world')
+    # The parameterised world descriptor (source of truth for the 3-D model).
+    # worlds/delta_arm.world is a committed copy of its output.
+    world_xacro = os.path.join(arm_gazebo_share, 'urdf', 'delta_arm.world.xacro')
+    world = os.path.join(tempfile.gettempdir(), 'delta_arm.generated.world')
     params_file = os.path.join(arm_share, 'config', 'arm_params.yaml')
 
     return LaunchDescription([
@@ -49,6 +59,11 @@ def generate_launch_description():
         DeclareLaunchArgument('verbose', default_value='true'),
         DeclareLaunchArgument('manual', default_value='false'),
         SetEnvironmentVariable('GAZEBO_PLUGIN_PATH', plugin_path),
+
+        ExecuteProcess(
+            cmd=['xacro', world_xacro, '-o', world],
+            name='xacro_world',
+        ),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(

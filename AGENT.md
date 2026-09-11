@@ -104,6 +104,23 @@ delta-arm kinematics from `arm` instead of recompiling it.
   workspace's `src/` (e.g. symlink `src/arm` → repo and `src/arm_gazebo` →
   `gazebo/`), then `colcon build` there. `arm_gazebo` depends on `arm`, so
   colcon orders it correctly.
+- The 3-D world is generated **at launch time** from the parameterised xacro
+  descriptor `gazebo/urdf/delta_arm.world.xacro` (SDF-format: `<sdf
+  xmlns:xacro=...>`); `arm_gazebo.launch.py` runs `xacro <desc> -o
+  /tmp/delta_arm.generated.world` before starting gzserver. `gazebo/worlds/
+  delta_arm.world` is a committed copy of that output (regenerate with
+  `xacro gazebo/urdf/delta_arm.world.xacro -o gazebo/worlds/delta_arm.world`).
+- The xacro uses the SAME mechanism parameters and IK/FK maths as the 2-D sim
+  (shared `geometry` values in `arm/config/arm_params.yaml`): shoulder pivots
+  at t = 45 mm, upper arms 160 mm (revolute, actuated), lower rods 320 mm
+  (ball joints at both ends → closed loop), platform radius 60 mm hanging
+  below the base, servo housings under the plate at 150 mm. The
+  `delta_arm_gazebo_plugin` subscribes to `arm/motor_targets` (deg) and PD+I
+  servoes the three shoulders; end-to-end it reproduces the IK angles (e.g.
+  initial pose (0,0,-0.30) → 5.17°/5.17°/5.17°, settled within ~1 mrad).
+  Targets that need a negative arm angle swing the upper arm UP into the base
+  plate (solid disc in the model) → self-blocking; the nominal workspace is
+  positive arm angles (servo range [0, 145] deg).
 - `gazebo_ros` / `glm` are found via `find_package(... QUIET)` and the
   `arm_sim_gazebo` executable is only built when they are present, so a
   headless build of `arm` stays unaffected.

@@ -25,42 +25,53 @@ constexpr float kCos120 = -0.5f;
 constexpr float kSin120 = 0.8660254037844386f; // sqrt(3)/2
 
 /**
- * Solves the classic per-limb delta IK (DeltaKin, R.L. Williams II /
- * tinkersprojects delta_calcAngleYZ formulation).
+ * Solves the per-limb delta IK for the real mechanism:
  *
- * Takes the end-effector position (x0, y0, z0) in the limb's coordinate frame
- * (which has been rotated so the limb lies in the yz-plane) and the geometry
- * (base triangle side `f`, effector triangle side `e`, upper arm `rf`,
- * lower rod `re`). Returns the upper-arm angle in DEGREES (the sign/orientation
- * follows the reference implementation). Throws if the point is unreachable.
+ *   * the three motor pivots lie on a circle of radius `t` about the base axis
+ *     (equilateral, one pivot per limb plane);
+ *   * the end-effector platform triangle has the SAME orientation as the base
+ *     triangle, so the platform joint of a limb sits on the SAME radial line as
+ *     its motor, at radius `pr` from the effector centre;
+ *   * a limb of radius rf sweeps from the motor pivot, and the lower rod of
+ *     length re closes from the upper-arm end (elbow) to the platform joint.
  *
- * Note: z must be non-zero for the division by z0 to be safe.
+ * `(x0, y0, z0)` is the end-effector centre in the limb's coordinate frame
+ * (axis y = the limb's outward radial, z = up). Returns the motor angle in
+ * DEGREES with the arm convention 0 deg = limb straight out, growing angle
+ * sweeps the limb downward. Throws if the point is unreachable.
+ *
+ * Closed form: with A = (0,-t) the pivot, V = (x0, y0-pr, z0) the platform
+ * joint and E(b) = (0, -t - rf*cos(b), -rf*sin(b)) the elbow:
+ *
+ *   (rf*cos b + Y)^2 + (rf*sin b + Z)^2 = re^2 - x0^2
+ *     where  Y = t + y0 - pr,  Z = z0
+ *   =>  Y*cos b + Z*sin b = (re^2 - x0^2 - rf^2 - Y^2 - Z^2) / (2*rf)  = M
+ *   =>  b = phi +- acos(M/rho),  phi = atan2(Z, Y),  rho = |(Y,Z)|.
+ *
+ * Exactly one of the two roots corresponds to the outward-hanging arm; it is
+ * the one with the smallest |b|.
  */
-float delta_calc_angle_yz(float x0, float y0, float z0, float f, float e, float rf, float re) {
-    // Center-to-edge shifts for the two equilateral triangles.
-    const float y1 = -0.5f * kTan30 * f; // -f/2 * tan(30)  (base joint offset)
-    y0 -= 0.5f * kTan30 * e;             // shift the effector center to its edge
-
-    // Line through the two intersection points: z = a + b*y
-    const float a = (x0 * x0 + y0 * y0 + z0 * z0 + rf * rf - re * re - y1 * y1) / (2.0f * z0);
-    const float b = (y1 - y0) / z0;
-
-    // Discriminant of the circle-intersection quadratic.
-    const float d = -(a + b * y1) * (a + b * y1) + rf * (b * b * rf + rf);
-    if (d < 0.0f) {
-        throw std::invalid_argument("Unreachable delta target (discriminant < 0)");
+float delta_calc_angle_yz(float x0, float y0, float z0,
+                          float t, float pr, float rf, float re) {
+    const float Y = t + y0 - pr;
+    const float Z = z0;
+    const float rho_sq = Y * Y + Z * Z;
+    if (rho_sq < 1e-6f) {
+        throw std::invalid_argument("Unreachable delta target (on-axis singularity)");
     }
 
-    // Choose the outer (valid) intersection point.
-    const float yj = (y1 - a * b - std::sqrt(d)) / (b * b + 1.0f);
-    const float zj = a + b * yj;
-
-    // Upper-arm angle (degrees) relative to the base.
-    float theta = std::atan2(-zj, (y1 - yj)) * kRadToDeg;
-    if (yj > y1) {
-        theta += 180.0f;
+    const float M = (re * re - x0 * x0 - rf * rf - rho_sq) / (2.0f * rf * std::sqrt(rho_sq));
+    if (M < -1.0f || M > 1.0f) {
+        throw std::invalid_argument("Unreachable delta target (circle miss)");
     }
-    return theta;
+
+    const float phi = std::atan2(Z, Y);
+    const float delta = std::acos(M);
+    float th0 = phi + delta;
+    float th1 = phi - delta;
+    if (std::fabs(th1) < std::fabs(th0)) th0 = th1;
+
+    return th0 * kRadToDeg;
 }
 
 } // namespace
@@ -138,6 +149,10 @@ void Arm::ik_stage1(const Vec3& target) {
 
     const float f = configs_[0].base_radius * kSqrt3;     // base triangle side
     const float e = configs_[0].platform_radius * kSqrt3; // effector triangle side
+    // Motor-pivot radius: the motor pivots sit on a circle of radius
+    // (base_edge - effector_edge) * tan(30)/2 from the base axis. This is the
+    // SAME offset the forward kinematics and the visualizer use.
+    const float t = (f - e) * kTan30 / 2.0f;
 
     for (int leg = 0; leg < 3; ++leg) {
         // Rotate the target into the limb's frame (the limb's plane becomes the
@@ -148,8 +163,8 @@ void Arm::ik_stage1(const Vec3& target) {
         const float rx = x * ca + y * sa;
         const float ry = -x * sa + y * ca;
 
-        // Upper-arm angle in degrees for this limb.
-        const float theta_deg = delta_calc_angle_yz(rx, ry, z, f, e, c.upper_arm_len, c.lower_arm_len);
+        // Upper-arm angle in degrees for this limb (real-mechanism solver).
+        const float theta_deg = delta_calc_angle_yz(rx, ry, z, t, c.platform_radius, c.upper_arm_len, c.lower_arm_len);
         stage1_thetas_[leg] = theta_deg * kDegToRad;
     }
 }
@@ -177,30 +192,39 @@ void Arm::compute_ik(const Vec3& target) {
  * kinematics, DeltaKin reference).
  */
 Vec3 Arm::forward_kinematics(const float angles_deg[3]) const {
-    // Geometry (triangle sides from the same radii as IK).
+    // Geometry (same radii/pivots as the IK).
     const float f = configs_[0].base_radius * kSqrt3;
     const float e = configs_[0].platform_radius * kSqrt3;
     const float re = configs_[0].lower_arm_len;
 
-    // Offset parameter: the distance from the robot centre to a joint line.
+    // Motor-pivot radius (as above) and effector triangle radius.
     const float t = (f - e) * kTan30 / 2.0f;
+    const float pr = configs_[0].platform_radius;
 
-    // Arm endpoints J1, J2, J3 (classic direct-kinematics construction).
+    // Limb radial directions (equilateral, one per limb plane). The elbow of a
+    // limb sits on its radial at (t + rf*cos(a)) with z = -rf*sin(a).
+    const float k1 = kSin120; // leg 1 radial: (sin120, +0.5); leg 0: (0,-1); leg 2: (-sin120,+0.5)
+
     const float a1 = angles_deg[0] * kDegToRad;
     const float a2 = angles_deg[1] * kDegToRad;
     const float a3 = angles_deg[2] * kDegToRad;
 
-    const float y1 = -(t + configs_[0].upper_arm_len * std::cos(a1));
+    // Sphere centres for the rod constraints: elbow minus its platform-joint
+    // offset (the platform joint of a limb lies on the same radial as its
+    // motor, i.e. the effector triangle is apex-down). Each rod of length re
+    // then constrains the effector CENTRE to a sphere of radius re.
+    const float u1 = t + configs_[0].upper_arm_len * std::cos(a1) - pr;
+    const float y1 = -u1;
     const float z1 = -configs_[0].upper_arm_len * std::sin(a1);
 
-    const float y2p = t + configs_[1].upper_arm_len * std::cos(a2);
-    const float x2 = y2p * kSin120;
-    const float y2 = y2p * kCos120;
+    const float u2 = t + configs_[1].upper_arm_len * std::cos(a2) - pr;
+    const float x2 = u2 * k1;
+    const float y2 = u2 * 0.5f;
     const float z2 = -configs_[1].upper_arm_len * std::sin(a2);
 
-    const float y3p = t + configs_[2].upper_arm_len * std::cos(a3);
-    const float x3 = -y3p * kSin120;
-    const float y3 = y3p * kCos120;
+    const float u3 = t + configs_[2].upper_arm_len * std::cos(a3) - pr;
+    const float x3 = -u3 * kSin120;
+    const float y3 = u3 * 0.5f;
     const float z3 = -configs_[2].upper_arm_len * std::sin(a3);
 
     // Denominator for the linear solve.

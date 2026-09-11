@@ -67,6 +67,7 @@ private:
   std::string feedback_frame_;
   bool streaming_;
   bool estop_active_;
+  bool simulate_arrival_;
 };
 
 }  // namespace DeltaArmRos

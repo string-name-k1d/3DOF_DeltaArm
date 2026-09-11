@@ -55,3 +55,32 @@ TEST(DeltaArm, EmergencyStopZeroesOutputs)
   EXPECT_FLOAT_EQ(cur.y, 0.0f);
   EXPECT_FLOAT_EQ(cur.z, 0.0f);
 }
+
+// The IK and FK must be mutually consistent (perlimb closed chain, effector
+// triangle apex-down, motor pivots on the t=45mm circle): solving IK for a
+// target and then running FK on those motor angles must recover the target.
+// The default geometry is base circumradius 150, platform circumradius 60,
+// upper arm 160, lower rod 320 (all mm).
+TEST(DeltaArm, IkFkRoundTrip)
+{
+  DeltaArm::Arm arm(nullptr);
+  arm.init();
+
+  const float kTol = 2.0e-3f; // 2 mm
+  const DeltaArm::Vec3 targets[] = {
+      {0.0f, 0.0f, -0.304f},
+      {0.03f, -0.02f, -0.28f},
+      {-0.02f, 0.04f, -0.32f},
+      {0.05f, 0.05f, -0.25f},
+      {0.0f, -0.05f, -0.24f},
+  };
+
+  for (const auto& t : targets) {
+    arm.set_tar_pos(t.x, t.y, t.z);
+    arm.apply(); // promote commanded targets and refresh the FK estimate
+    const DeltaArm::Vec3 back = arm.get_cur_pos();
+    EXPECT_NEAR(back.x, t.x, kTol) << "target (" << t.x << ", " << t.y << ", " << t.z << ")";
+    EXPECT_NEAR(back.y, t.y, kTol) << "target (" << t.x << ", " << t.y << ", " << t.z << ")";
+    EXPECT_NEAR(back.z, t.z, kTol) << "target (" << t.x << ", " << t.y << ", " << t.z << ")";
+  }
+}

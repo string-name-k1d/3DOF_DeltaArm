@@ -12,20 +12,22 @@
 
 set +e
 
-# Executables (2-D SFML, controller, manual, real-HW, Gazebo).
-pkill -x arm_controller
-pkill -x arm_sim_sfml
-pkill -x arm_manual
-pkill -x arm_system
-pkill -x arm_motor_driver
-pkill -x gzserver
-pkill -x gzclient
+# Executables (2-D SFML, controller, manual, real-HW, Gazebo). SIGKILL so an
+# ignored SIGTERM can never leave an orphaned window/node behind.
+pkill -9 -x arm_controller
+pkill -9 -x arm_sim_sfml
+pkill -9 -x arm_manual
+pkill -9 -x arm_system
+pkill -9 -x arm_motor_driver
+pkill -9 -x gzserver
+pkill -9 -x gzclient
 sleep 1
 
 # ros2 launch wrapper processes left behind by the above (child death makes
 # them exit on their own, but kill them anyway so the DDS graph goes quiet).
-pkill -f "ros2 launch arm"
-pkill -f "arm_sim_2d.launch.py"
+pkill -9 -f "ros2 launch arm"
+pkill -9 -f "arm_sim_2d.launch.py"
+pkill -9 -f "arm_sim_sfml --ros-args"
 sleep 1
 
 # Clear the ROS discovery daemon cache so `ros2 node list` is not stale.

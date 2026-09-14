@@ -112,7 +112,7 @@ delta-arm kinematics from `arm` instead of recompiling it.
   `xacro gazebo/urdf/delta_arm.world.xacro -o gazebo/worlds/delta_arm.world`).
 - The xacro uses the SAME mechanism parameters and IK/FK maths as the 2-D sim
   (shared `geometry` values in `arm/config/arm_params.yaml`): shoulder pivots
-  at t = 45 mm, upper arms 160 mm (revolute, actuated), lower rods 320 mm
+  at t = 45 mm, upper arms 160 mm (revolute, actuated), lower rods 200 mm
   (ball joints at both ends → closed loop), platform radius 60 mm hanging
   below the base, servo housings under the plate at 150 mm. The
   `delta_arm_gazebo_plugin` subscribes to `arm/motor_targets` (deg) and PD+I

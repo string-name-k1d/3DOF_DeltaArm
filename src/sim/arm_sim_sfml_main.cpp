@@ -8,10 +8,13 @@
 // the controller via arm_params.yaml) instead of being hardcoded. The base
 // triangle is drawn THROUGH the three SERVO output shafts (the plate's
 // vertices). The servos are mounted UNDER the base plate: each drives its arm
-// through a two-rod linkage (single upper rod on the shaft + single lower rod)
-// running below the plate up to a point at fixed distance from the inner
-// actuation joint (radius t) on the upper arm; the linkage rotates by the arm
-// angle, and a readout shows each servo angle (nominal range [0,145] deg,
+// through a two-rod linkage (single crank on the shaft + one RIGID rod of
+// constant length) running below the plate up to a point near the ELBOW of the
+// upper arm (well beyond the motor shaft's radius). The crank points OUTWARD
+// (along the arm direction), and its pin is solved each frame so the connecting
+// rod keeps a FIXED length (true 4-bar); its motor-side joint therefore sits
+// further away from the platform than an inward crank would.
+// The linkage rotates by the arm angle, and a readout shows each servo angle (nominal range [0,145] deg,
 // amber when outside). The LOWER ARM (elbow -> platform joint) is drawn as two
 // parallel bars. Joints and rods are colour-coded per limb: red = leg 0,
 // green = leg 1, blue = leg 2.
@@ -43,7 +46,7 @@ struct Geom
   float base_radius = 150.0f;     // circumradius, base-plate triangle (mm)
   float platform_radius = 60.0f;  // circumradius, platform-joint triangle (mm)
   float upper_arm_len = 160.0f;   // arm actuation joint -> elbow (mm)
-  float lower_arm_len = 320.0f;   // elbow -> platform joint rod (mm)
+  float lower_arm_len = 200.0f;   // elbow -> platform joint rod (mm)
 
   float base_side = 0.0f;         // base triangle side length (f)
   float t = 0.0f;                 // arm actuation-joint offset from centre axis (mm)
@@ -51,18 +54,26 @@ struct Geom
   // Servo-linkage geometry (drives the "fake" arm joints). Mechanism per arm:
   //   servo shaft -> "upper" rod (a SINGLE bar fixed on the shaft)
   //               -> "lower" rod (a SINGLE bar)
-  //               -> the upper arm, at a point at fixed distance from the base
-  //                  (actuation) joint. The LOWER ARM (elbow -> platform joint)
-  //                  is drawn as 2 PARALLEL bars. Names match arm_params.yaml.
+  //               -> the upper arm, near the ELBOW.
+  // The LOWER ARM (elbow -> platform joint) is drawn as 2 PARALLEL bars.
+  // Names match arm_params.yaml. The upper rod is a SHORT motor crank (servo
+  // horn) pointing OUTWARD along the arm direction, so its far pin (the rod's
+  // motor-side joint) lies beyond the servo shaft's radius, further from the
+  // platform; the lower (arm-side) rod is LONGER, meeting the arm close to the
+  // elbow (i.e. at a radius still beyond the motor shaft from the base axis).
   float servo_radius = 150.0f;      // radius of the servo output shafts (mm)
   float servo_z = -25.0f;           // servo height BELOW the pivot plane: the
                                     // servo mounts under the base plate and the
                                     // whole linkage runs below it, up to the
                                     // arm's attach point (matches the CAD photo).
-  float upper_rod_len = 60.0f;      // "upper rod": single bar fixed to the servo
-                                    // shaft, length (mm); points inward to the hub
-  float arm_attach_dist = 30.0f;    // fixed distance from the arm's base joint to
-                                    // the lower-rod attach point, along the arm (mm)
+  float upper_rod_len = 35.0f;      // crank: single bar fixed to the servo
+                                    // shaft (SHORT motor horn), length (mm)
+  float servo_rod_len = 65.5f;      // RIGID connecting rod (crank pin -> arm
+                                    // attach point f); constant length, so the
+                                    // linkage arms swing as a true 4-bar
+  float arm_attach_dist = 140.0f;   // fixed distance from the arm's base joint to
+                                    // the lower-rod attach point, along the arm (mm);
+                                    // kept LARGE so the rod connects near the ELBOW
   float rod_spread = 8.0f;          // lateral separation of the two parallel bars
                                     // of each LOWER ARM (visual only, ±mm)
 
@@ -79,7 +90,7 @@ static Geom loadGeometry(rclcpp::Node & n)
   g.base_radius = static_cast<float>(n.declare_parameter<double>("geometry.base_radius", 150.0));
   g.platform_radius = static_cast<float>(n.declare_parameter<double>("geometry.platform_radius", 60.0));
   g.upper_arm_len = static_cast<float>(n.declare_parameter<double>("geometry.upper_arm_len", 160.0));
-  g.lower_arm_len = static_cast<float>(n.declare_parameter<double>("geometry.lower_arm_len", 320.0));
+  g.lower_arm_len = static_cast<float>(n.declare_parameter<double>("geometry.lower_arm_len", 200.0));
 
   g.base_side = g.base_radius * kSqrt3;                     // f
   const float platformSide = g.platform_radius * kSqrt3;    // e
@@ -99,8 +110,9 @@ static Geom loadGeometry(rclcpp::Node & n)
   // point (a fixed distance from the arm's base joint).
   g.servo_radius     = static_cast<float>(n.declare_parameter<double>("geometry.servo_radius", g.base_radius));
   g.servo_z          = static_cast<float>(n.declare_parameter<double>("geometry.servo_z", -25.0));
-  g.upper_rod_len    = static_cast<float>(n.declare_parameter<double>("geometry.upper_rod_len", 60.0));
-  g.arm_attach_dist  = static_cast<float>(n.declare_parameter<double>("geometry.arm_attach_dist", 30.0));
+  g.upper_rod_len    = static_cast<float>(n.declare_parameter<double>("geometry.upper_rod_len", 35.0));
+  g.servo_rod_len    = static_cast<float>(n.declare_parameter<double>("geometry.servo_rod_len", 65.5));
+  g.arm_attach_dist  = static_cast<float>(n.declare_parameter<double>("geometry.arm_attach_dist", 140.0));
   g.rod_spread       = static_cast<float>(n.declare_parameter<double>("geometry.rod_spread", 8.0));
   g.servos[0] = sf::Vector3f(0.0f, -g.servo_radius, g.servo_z);
   g.servos[1] = sf::Vector3f( g.servo_radius * kSin120,  g.servo_radius * 0.5f, g.servo_z);
@@ -190,26 +202,60 @@ static sf::Vector3f armUnitDir(int limb, float motorAngleDeg) {
   return sf::Vector3f(u.x * c, u.y * c, -s);
 }
 
-// Servo-linkage points: "upper" rod is a SINGLE bar fixed on the servo shaft
-// s, ending at e; "lower" rod is a SINGLE bar from e to the arm's attach point
-// f, which sits on the upper arm at a fixed distance (arm_attach_dist) from
-// its base joint a. (The lower ARM, elbow -> platform, is a separate pair of
-// parallel bars drawn in the limb loops.)
+// Servo-linkage points: the "upper" rod is a crank of fixed length
+// (upper_rod_len) keyed to the servo shaft s; the "lower" rod is a RIGID bar
+// of constant length (servo_rod_len) from the crank pin e to the arm's attach
+// point f, which sits on the upper arm at a fixed distance (arm_attach_dist)
+// from its base joint a. The crank pin is solved so that |e - f| stays equal
+// to servo_rod_len for every arm angle (true 4-bar), with the OUTWARD branch
+// chosen so the rod's motor-side joint sits beyond the servo shaft's radius,
+// i.e. further away from the platform than an inward-pointing crank.
+// (The lower ARM, elbow -> platform, is a separate pair of parallel bars
+// drawn in the limb loops.)
 struct LinkPins
 {
   sf::Vector3f e, f;
 };
 
+// Crank pin: point at distance `crank` from the shaft s and at exactly
+// `rodLen` from the attach f, in the limb's vertical plane (radius, z).
+// Outward (larger-radius) intersection is preferred; if the circles do not
+// intersect the pin is clamped toward f so the draw never explodes.
+static sf::Vector3f crankPin(int limb, float crank, float rodLen,
+                             const sf::Vector3f & s, const sf::Vector3f & f) {
+  const sf::Vector3f u = limbRadial(limb);
+  const float rs = s.x * u.x + s.y * u.y;
+  const float rf = f.x * u.x + f.y * u.y;
+  const float rx = rf - rs, rz = f.z - s.z;
+  const float dist2 = rx * rx + rz * rz;
+  const float dist = std::sqrt(dist2);
+  if (dist < 1e-4f) return s + u * crank;
+  const float along = (crank * crank - rodLen * rodLen + dist2) / (2.0f * dist);
+  const float h2 = crank * crank - along * along;
+  if (h2 < 0.0f) {  // unreachable at this arm angle: clamp the pin toward f
+    const sf::Vector3f dir = f - s;
+    const float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
+    return (len < 1e-4f) ? s + u * crank : s + dir * (crank / len);
+  }
+  const float h = std::sqrt(h2);
+  const float ux = rx / dist, uz = rz / dist;
+  const float qx = rs + along * ux, qz = s.z + along * uz;  // foot on s->f axis
+  const float nx = -uz, nz = ux;                            // unit normal in-plane
+  // Use the branch whose radius (horizontal distance from base axis) is larger.
+  const float radius = (nx >= 0.0f) ? qx + h * nx : qx - h * nx;
+  const float zc     = (nx >= 0.0f) ? qz + h * nz : qz - h * nz;
+  return u * (radius > 0.0f ? radius : 0.0f) + sf::Vector3f(0.0f, 0.0f, zc);
+}
+
 static LinkPins servoLinkage(const Geom & g, int limb, float motorAngleDeg) {
   const sf::Vector3f s = g.servos[limb];
   const sf::Vector3f a = g.motors[limb];
   const sf::Vector3f d = armUnitDir(limb, motorAngleDeg);
-  // Upper rod far end: INWARD from the shaft (opposite the arm direction), so
-  // the linkage stays between the servo and the hub (never reaches the elbow).
   LinkPins l;
-  l.e = s - d * g.upper_rod_len;
   // Lower-rod attach point on the upper arm: fixed distance from the base joint.
   l.f = a + d * g.arm_attach_dist;
+  // Crank pin keeps |e - f| = servo_rod_len (rigid rod) for any arm angle.
+  l.e = crankPin(limb, g.upper_rod_len, g.servo_rod_len, s, l.f);
   return l;
 }
 
@@ -300,8 +346,9 @@ static void drawLinkage(sf::RenderWindow & w, const Geom & g, int limb, float mo
   // hangs from the plate underside (z=0) down to the shaft plane.
   const sf::Vector3f postBase(s.x, s.y, 0.0f);
   drawLine(w, proj(postBase, cx, cy), proj(s, cx, cy), sf::Color(90, 90, 105), 5.0f);
-  // UPPER rod: the single bar fixed to the servo shaft, pointing inward to the
-  // hub (so it stays between the servo and the arm, never out to the elbow).
+  // UPPER rod: the single bar fixed to the servo shaft, pointing OUTWARD along
+  // the arm direction, so the crank pin (and the rod's motor-side joint) sits
+  // beyond the servo shaft's radius, away from the platform.
   drawLine(w, proj(s, cx, cy), proj(l.e, cx, cy), sf::Color(150, 150, 165), 3.0f);
   // LOWER rod: the single bar from the upper rod's far end to the arm's attach
   // point (at fixed distance from the arm's base joint).

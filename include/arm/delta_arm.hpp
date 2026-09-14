@@ -38,7 +38,7 @@ struct ArmMechConfig
   float platform_radius = 60.0f; // horizontal distance of a platform joint
                                  // from the end-effector axis (mm)
   float upper_arm_len = 160.0f;  // servo -> arm end (mm)
-  float lower_arm_len = 320.0f;  // arm end -> platform joint rod (mm)
+  float lower_arm_len = 200.0f;  // arm end -> platform joint rod (mm)
 
   float plane_angle = 0.0f;      // angle (radians) of this limb's vertical
                                  // plane around the base's central axis

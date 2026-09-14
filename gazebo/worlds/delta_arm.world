@@ -13,7 +13,7 @@
 
       pivot_radius    t  =  45 mm   shoulder pivot lines (actuation joints)
       upper_arm_len  rf = 160 mm   upper arm  (revolute, actuated)
-      rod_len        re = 320 mm   lower rod  (ball joint at BOTH ends)
+      rod_len        re = 200 mm   lower rod  (ball joint at BOTH ends)
       ee_radius      pr =  60 mm   platform circumradius (apex-down, hanging
 
   each platform joint sits on the SAME radial as its actuation joint):
@@ -299,7 +299,7 @@
         <pose>0 0 0 0 0 0</pose>
         <inertial>
           <mass>0.3</mass>
-          <pose>0 0 0.16 0 0 0</pose>
+          <pose>0 0 0.1 0 0 0</pose>
           <inertia>
             <ixx>3e-3</ixx>
             <iyy>3e-3</iyy>
@@ -314,7 +314,7 @@
           <geometry>
             <cylinder>
               <radius>0.01</radius>
-              <length>0.32</length>
+              <length>0.2</length>
             </cylinder>
           </geometry>
           <material>
@@ -327,7 +327,7 @@
           <geometry>
             <cylinder>
               <radius>0.01</radius>
-              <length>0.32</length>
+              <length>0.2</length>
             </cylinder>
           </geometry>
         </collision>
@@ -335,7 +335,7 @@
       <joint name="wrist_0" type="ball">
         <parent>rod_0</parent>
         <child>platform</child>
-        <pose>0 0 0.32 0 0 0</pose>
+        <pose>0 0 0.2 0 0 0</pose>
       </joint>
       <link name="mount_1">
         <pose>0.03897 0.0225 0 0 0 2.0944</pose>
@@ -406,7 +406,7 @@
         <pose>0 0 0 0 0 0</pose>
         <inertial>
           <mass>0.3</mass>
-          <pose>0 0 0.16 0 0 0</pose>
+          <pose>0 0 0.1 0 0 0</pose>
           <inertia>
             <ixx>3e-3</ixx>
             <iyy>3e-3</iyy>
@@ -421,7 +421,7 @@
           <geometry>
             <cylinder>
               <radius>0.01</radius>
-              <length>0.32</length>
+              <length>0.2</length>
             </cylinder>
           </geometry>
           <material>
@@ -434,7 +434,7 @@
           <geometry>
             <cylinder>
               <radius>0.01</radius>
-              <length>0.32</length>
+              <length>0.2</length>
             </cylinder>
           </geometry>
         </collision>
@@ -442,7 +442,7 @@
       <joint name="wrist_1" type="ball">
         <parent>rod_1</parent>
         <child>platform</child>
-        <pose>0 0 0.32 0 0 0</pose>
+        <pose>0 0 0.2 0 0 0</pose>
       </joint>
       <link name="mount_2">
         <pose>-0.03897 0.0225 0 0 0 4.1888</pose>
@@ -513,7 +513,7 @@
         <pose>0 0 0 0 0 0</pose>
         <inertial>
           <mass>0.3</mass>
-          <pose>0 0 0.16 0 0 0</pose>
+          <pose>0 0 0.1 0 0 0</pose>
           <inertia>
             <ixx>3e-3</ixx>
             <iyy>3e-3</iyy>
@@ -528,7 +528,7 @@
           <geometry>
             <cylinder>
               <radius>0.01</radius>
-              <length>0.32</length>
+              <length>0.2</length>
             </cylinder>
           </geometry>
           <material>
@@ -541,7 +541,7 @@
           <geometry>
             <cylinder>
               <radius>0.01</radius>
-              <length>0.32</length>
+              <length>0.2</length>
             </cylinder>
           </geometry>
         </collision>
@@ -549,13 +549,13 @@
       <joint name="wrist_2" type="ball">
         <parent>rod_2</parent>
         <child>platform</child>
-        <pose>0 0 0.32 0 0 0</pose>
+        <pose>0 0 0.2 0 0 0</pose>
       </joint>
       <!-- ==================================================================  -->
       <!-- PLATFORM (end-effector)                                             -->
       <!-- ==================================================================  -->
       <link name="platform">
-        <pose>0 0 -0.2853 0 0 0</pose>
+        <pose>0 0 -0.1377 0 0 0</pose>
         <inertial>
           <mass>0.4</mass>
           <pose>0 0 -0.0075 0 0 0</pose>

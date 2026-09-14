@@ -9,7 +9,7 @@
 
       pivot_radius    t  =  45 mm   shoulder pivot lines (actuation joints)
       upper_arm_len  rf = 160 mm   upper arm  (revolute, actuated)
-      rod_len        re = 320 mm   lower rod  (ball joint at BOTH ends)
+      rod_len        re = 200 mm   lower rod  (ball joint at BOTH ends)
       ee_radius      pr =  60 mm   platform circumradius (apex-down, hanging
 
   each platform joint sits on the SAME radial as its actuation joint):
@@ -31,14 +31,14 @@
   <!-- ==================== PARAMETERS ==================== -->
   <xacro:property name="pivot_radius"        value="0.045" /> <!-- t:  joint radius, mm/1000 -->
   <xacro:property name="upper_arm_len"       value="0.160" /> <!-- rf: upper arm length -->
-  <xacro:property name="rod_len"             value="0.320" /> <!-- re: lower rod length -->
+  <xacro:property name="rod_len"             value="0.200" /> <!-- re: lower rod length -->
   <xacro:property name="ee_radius"           value="0.060" /> <!-- pr: platform radius -->
   <xacro:property name="servo_radius"        value="0.150" /> <!-- plate-vertex servo radius -->
   <xacro:property name="servo_z"             value="-0.025" /> <!-- servo housing below plate -->
   <!-- True passive rest height: at shoulder 0 the elbow is at radius
        t+rf = 205 mm, the platform joint at pr = 60 mm, so the rod drop =
-       sqrt(re^2 - (t+rf-pr)^2) = sqrt(0.320^2 - 0.145^2) = 0.2853 m. -->
-  <xacro:property name="platform_z_rest"     value="-0.2853" />
+       sqrt(re^2 - (t+rf-pr)^2) = sqrt(0.200^2 - 0.145^2) = 0.1377 m. -->
+  <xacro:property name="platform_z_rest"     value="-0.1377" />
 
   <!-- ======================================================================  -->
   <!-- MACROS                                                                  -->

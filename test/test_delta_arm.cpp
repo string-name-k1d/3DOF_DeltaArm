@@ -60,7 +60,7 @@ TEST(DeltaArm, EmergencyStopZeroesOutputs)
 // triangle apex-down, motor pivots on the t=45mm circle): solving IK for a
 // target and then running FK on those motor angles must recover the target.
 // The default geometry is base circumradius 150, platform circumradius 60,
-// upper arm 160, lower rod 320 (all mm).
+// upper arm 160, lower rod 200 (all mm).
 TEST(DeltaArm, IkFkRoundTrip)
 {
   DeltaArm::Arm arm(nullptr);

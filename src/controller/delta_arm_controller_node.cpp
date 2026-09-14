@@ -41,18 +41,21 @@ void DeltaArmControllerNode::declareParams()
   const double upper_arm_len =
     declare_parameter<double>("geometry.upper_arm_len", 160.0);
   const double lower_arm_len =
-    declare_parameter<double>("geometry.lower_arm_len", 320.0);
+    declare_parameter<double>("geometry.lower_arm_len", 200.0);
 
   // Visual-only servo-linkage parameters (the controller does not use them;
   // declared so the shared geometry block loads without "not declared"
-  // warnings). Mechanism per arm: servo shaft -> upper rod (single bar)
-  // -> lower rod (single bar) -> upper arm at a fixed distance from the base
-  // joint (arm_attach_dist). The lower arm (elbow->platform) is drawn as 2
+  // warnings). Mechanism per arm: servo shaft -> upper rod (single short motor
+  // crank / horn) -> lower rod (single RIGID bar of constant length
+  // servo_rod_len, solved as a true 4-bar; the crank pin is recomputed each
+  // frame so the rod never stretches) -> upper arm close to the ELBOW
+  // (arm_attach_dist large). The lower arm (elbow->platform) is drawn as 2
   // parallel bars separated by rod_spread.
   declare_parameter<double>("geometry.servo_radius", 150.0);
   declare_parameter<double>("geometry.servo_z", -25.0);
-  declare_parameter<double>("geometry.upper_rod_len", 60.0);
-  declare_parameter<double>("geometry.arm_attach_dist", 30.0);
+  declare_parameter<double>("geometry.upper_rod_len", 35.0);
+  declare_parameter<double>("geometry.servo_rod_len", 65.5);
+  declare_parameter<double>("geometry.arm_attach_dist", 140.0);
   declare_parameter<double>("geometry.rod_spread", 8.0);
 
   simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);

@@ -59,26 +59,38 @@ arm_controller:
       base_radius: 150.0
       platform_radius: 60.0
       upper_arm_len: 160.0
-      lower_arm_len: 320.0
+      lower_arm_len: 200.0
 
       # Visual-only servo-linkage parameters (visualiser). Mechanism per arm:
-      #   servo shaft -> rod "upper"   (a SINGLE bar fixed on the shaft)
-      #               -> rod "lower"   (a SINGLE bar)
-      #               -> the upper arm, at a point at FIXED distance from the
-      #                  base (actuation) joint.
+      #   servo shaft -> rod "upper"   (a SINGLE crank fixed on the shaft)
+      #               -> rod "lower"   (a SINGLE RIGID rod)
+      #               -> the upper arm, at a point near the ELBOW.
       # The LOWER ARM (elbow -> platform joint) is drawn as 2 PARALLEL bars.
       # servo_radius is the circumradius of the servo output shafts; it
       # defaults to base_radius. The servos are mounted UNDER the base plate,
       # so servo_z < 0 puts the whole linkage below the plate, up to the arm's
-      # attach point. upper_rod_len is the length of the upper rod (it points
-      # inward to the hub). arm_attach_dist is the fixed distance from the
-      # arm's base joint to the lower-rod attach point, measured along the
-      # arm. rod_spread is the lateral separation of the two parallel bars of
-      # each lower arm.
+      # attach point. upper_rod_len is the SHORT motor crank (servo horn)
+      # fixed to the shaft, pointing OUTWARD (its pin sits beyond the servo
+      # shaft's radius, further from the platform).
+      # servo_rod_len is the CONSTANT length of the rigid connecting rod
+      # (crank pin -> arm attach point): the crank pin is solved each frame so
+      # the rod keeps this fixed length (true 4-bar) and never stretches.
+      # Range: the crank (upper_rod_len=35) can only reach the rod's far
+      # circle for arm angles where |dist(s,f) - servo_rod_len| <= 35;
+      # with 65.5 the solve is exact up to ~59 deg and gracefully clamps toward
+      # the attach point beyond that (instead of drawing a stretching rod).
+      # Raising servo_rod_len moves the reachable band up (deep-arm poses) at
+      # the cost of the flat (shallow) ones.
+      # arm_attach_dist is the fixed distance from the arm's base joint to the
+      # lower-rod attach point, measured along the arm (kept LARGE so the rod
+      # connects close to the ELBOW, i.e. at a radius well beyond the motor
+      # shaft). rod_spread is the lateral separation of the two parallel bars
+      # of each lower arm.
       servo_radius: 150.0
       servo_z: -25.0
-      upper_rod_len: 60.0
-      arm_attach_dist: 30.0
+      upper_rod_len: 35.0
+      servo_rod_len: 65.5
+      arm_attach_dist: 140.0
       rod_spread: 8.0
 
     # Simulation behaviour (shared by controller + visualiser):

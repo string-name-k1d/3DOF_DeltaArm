@@ -115,7 +115,7 @@ void Arm::init_default_geometry() {
         c.base_radius = 150.0f;    // mm (circumradius of the base triangle)
         c.platform_radius = 60.0f; // mm (circumradius of the effector triangle)
         c.upper_arm_len = 160.0f;  // mm
-        c.lower_arm_len = 320.0f;  // mm
+        c.lower_arm_len = 200.0f;  // mm
         c.plane_angle = leg * kTwoPiOver3;
         c.home_offset = 0.0f;
         configs_.push_back(c);

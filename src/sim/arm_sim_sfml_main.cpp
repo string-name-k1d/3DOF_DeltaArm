@@ -30,12 +30,12 @@
 
 #include "arm/arm_sim_sfml.hpp"
 
-// ── Numeric constants used for the derived joint geometry ──────────────────
-static constexpr float kSqrt3  = 1.7320508075688772f;
-static constexpr float kTan30  = 0.5773502691896258f;   // 1/√3
+// ── Numeric constants used for the derived joint geometry ────────────────────
 static constexpr float kSin120 = 0.8660254037844386f;   // √3/2
 static constexpr float kCos120 = -0.5f;
 static constexpr float kPi     = 3.141592653589793f;
+static constexpr float kTwoPiOver3 = 2.0943951023931953f; // 120 deg
+static constexpr float kRadToDeg   = 57.29577951308232f;  // 180/π
 
 // Pixel scale: 1 mm = this many pixels.
 static constexpr float kScale = 1.25f;   // mm -> px; fits servo plate (150) + elbow reach (205)
@@ -48,8 +48,9 @@ struct Geom
   float upper_arm_len = 160.0f;   // arm actuation joint -> elbow (mm)
   float lower_arm_len = 200.0f;   // elbow -> platform joint rod (mm)
 
-  float base_side = 0.0f;         // base triangle side length (f)
-  float t = 0.0f;                 // arm actuation-joint offset from centre axis (mm)
+  float t = 0.0f;                 // arm actuation-joint (shoulder pivot) radius from
+                                  // the centre axis (mm): the shoulders sit ON the
+                                  // base-plate corner circle (== base_radius).
 
   // Servo-linkage geometry (drives the "fake" arm joints). Mechanism per arm:
   //   servo shaft -> "upper" rod (a SINGLE bar fixed on the shaft)
@@ -74,6 +75,11 @@ struct Geom
   float arm_attach_dist = 140.0f;   // fixed distance from the arm's base joint to
                                     // the lower-rod attach point, along the arm (mm);
                                     // kept LARGE so the rod connects near the ELBOW
+  float arm_attach_offset = 20.5f;  // PERPENDICULAR standoff of the lower rod's
+                                    // arm-side joint from the arm axis (mm): the
+                                    // ball-socket bracket holds the rod end this
+                                    // far off the arm (real gap between the rod's
+                                    // endpoint and the arm)
   float rod_spread = 8.0f;          // lateral separation of the two parallel bars
                                     // of each LOWER ARM (visual only, ±mm)
 
@@ -92,9 +98,9 @@ static Geom loadGeometry(rclcpp::Node & n)
   g.upper_arm_len = static_cast<float>(n.declare_parameter<double>("geometry.upper_arm_len", 160.0));
   g.lower_arm_len = static_cast<float>(n.declare_parameter<double>("geometry.lower_arm_len", 200.0));
 
-  g.base_side = g.base_radius * kSqrt3;                     // f
-  const float platformSide = g.platform_radius * kSqrt3;    // e
-  g.t = (g.base_side - platformSide) * kTan30 / 2.0f;
+  // Shoulder pivots sit ON the base-plate corner circle (each base-plate vertex
+  // is the arm's base joint); the effector triangle is the inverted platform.
+  g.t = g.base_radius;
 
   // Derived joint positions: an equilateral set spaced 120 deg apart, matching
   // the delta-arm FK / Gazebo model. Leg 0 points along -Y. The effector
@@ -113,6 +119,7 @@ static Geom loadGeometry(rclcpp::Node & n)
   g.upper_rod_len    = static_cast<float>(n.declare_parameter<double>("geometry.upper_rod_len", 35.0));
   g.servo_rod_len    = static_cast<float>(n.declare_parameter<double>("geometry.servo_rod_len", 65.5));
   g.arm_attach_dist  = static_cast<float>(n.declare_parameter<double>("geometry.arm_attach_dist", 140.0));
+  g.arm_attach_offset = static_cast<float>(n.declare_parameter<double>("geometry.arm_attach_offset", 20.5));
   g.rod_spread       = static_cast<float>(n.declare_parameter<double>("geometry.rod_spread", 8.0));
   g.servos[0] = sf::Vector3f(0.0f, -g.servo_radius, g.servo_z);
   g.servos[1] = sf::Vector3f( g.servo_radius * kSin120,  g.servo_radius * 0.5f, g.servo_z);
@@ -202,25 +209,38 @@ static sf::Vector3f armUnitDir(int limb, float motorAngleDeg) {
   return sf::Vector3f(u.x * c, u.y * c, -s);
 }
 
+// Unit PERPENDICULAR to the upper arm in the limb's vertical plane, pointing
+// to the UNDERSIDE of the arm (so a=0 -> straight down -z): the direction in
+// which the rod's arm-side ball joint stands off the arm axis.
+static sf::Vector3f armStandoff(int limb, float motorAngleDeg) {
+  const float s = std::sin(motorAngleDeg * kPi / 180.0f);
+  const float c = std::cos(motorAngleDeg * kPi / 180.0f);
+  const sf::Vector3f u = limbRadial(limb);
+  return sf::Vector3f(-u.x * s, -u.y * s, -c);
+}
+
 // Servo-linkage points: the "upper" rod is a crank of fixed length
 // (upper_rod_len) keyed to the servo shaft s; the "lower" rod is a RIGID bar
-// of constant length (servo_rod_len) from the crank pin e to the arm's attach
-// point f, which sits on the upper arm at a fixed distance (arm_attach_dist)
-// from its base joint a. The crank pin is solved so that |e - f| stays equal
-// to servo_rod_len for every arm angle (true 4-bar), with the OUTWARD branch
-// chosen so the rod's motor-side joint sits beyond the servo shaft's radius,
-// i.e. further away from the platform than an inward-pointing crank.
+// of constant length (servo_rod_len) from the crank pin e to the arm-side
+// socket f. The socket stands a fixed perpendicular distance (arm_attach_offset)
+// off the arm axis at a bracket that sits on the arm at arm_attach_dist from
+// its base joint a. The crank pin is solved so that |e - f| stays equal to
+// servo_rod_len for every arm angle (true 4-bar), with the DOWNWARD branch
+// chosen so the horn hangs below the shaft, i.e. toward the arm and platform
+// (matches the physical servo-horn mounting).
 // (The lower ARM, elbow -> platform, is a separate pair of parallel bars
 // drawn in the limb loops.)
 struct LinkPins
 {
   sf::Vector3f e, f;
+  sf::Vector3f arm;   // point ON the upper-arm axis where the attach bracket sits
 };
 
 // Crank pin: point at distance `crank` from the shaft s and at exactly
 // `rodLen` from the attach f, in the limb's vertical plane (radius, z).
-// Outward (larger-radius) intersection is preferred; if the circles do not
-// intersect the pin is clamped toward f so the draw never explodes.
+// The DOWNWARD (lower-z) intersection is preferred - the horn hangs below the
+// shaft; if the circles do not intersect the pin is clamped toward f so the
+// draw never explodes.
 static sf::Vector3f crankPin(int limb, float crank, float rodLen,
                              const sf::Vector3f & s, const sf::Vector3f & f) {
   const sf::Vector3f u = limbRadial(limb);
@@ -241,9 +261,14 @@ static sf::Vector3f crankPin(int limb, float crank, float rodLen,
   const float ux = rx / dist, uz = rz / dist;
   const float qx = rs + along * ux, qz = s.z + along * uz;  // foot on s->f axis
   const float nx = -uz, nz = ux;                            // unit normal in-plane
-  // Use the branch whose radius (horizontal distance from base axis) is larger.
-  const float radius = (nx >= 0.0f) ? qx + h * nx : qx - h * nx;
-  const float zc     = (nx >= 0.0f) ? qz + h * nz : qz - h * nz;
+  // Choose the circle-intersection branch that lies BELOW the shaft (lower
+  // z), so the servo horn points down toward the arm. Fall back to the other
+  // branch only if that one has an invalid (negative) horizontal radius.
+  const float r1 = qx + h * nx, z1 = qz + h * nz;
+  const float r2 = qx - h * nx, z2 = qz - h * nz;
+  const bool use1 = (z1 <= z2) && (r1 > 0.0f);
+  const float radius = use1 ? r1 : r2;
+  const float zc = use1 ? z1 : z2;
   return u * (radius > 0.0f ? radius : 0.0f) + sf::Vector3f(0.0f, 0.0f, zc);
 }
 
@@ -253,7 +278,10 @@ static LinkPins servoLinkage(const Geom & g, int limb, float motorAngleDeg) {
   const sf::Vector3f d = armUnitDir(limb, motorAngleDeg);
   LinkPins l;
   // Lower-rod attach point on the upper arm: fixed distance from the base joint.
-  l.f = a + d * g.arm_attach_dist;
+  l.arm = a + d * g.arm_attach_dist;
+  // The rod's arm-side ball joint stands OFF the arm axis by arm_attach_offset
+  // (perpendicular, toward the arm underside) - the real bracket gap.
+  l.f = l.arm + armStandoff(limb, motorAngleDeg) * g.arm_attach_offset;
   // Crank pin keeps |e - f| = servo_rod_len (rigid rod) for any arm angle.
   l.e = crankPin(limb, g.upper_rod_len, g.servo_rod_len, s, l.f);
   return l;
@@ -297,6 +325,42 @@ static bool fkFromAngles(const Geom & g, const float angDeg[3], sf::Vector3f & e
   const sf::Vector3f hi = c[0] + x0 - n * lam;
   e = (lo.z < hi.z) ? lo : hi;
   return true;
+}
+
+// Closed-form per-limb IK, mirroring the controller's delta_calc_angle_yz:
+// target is the effector centre expressed in the limb frame where the outward
+// radial is the NEGATIVE y axis and z is up. Returns the motor angle in DEGREES
+// (0 = limb straight out, growing angle sweeps the arm downward), choosing the
+// smaller |angle| root. 0 is returned when the point is unreachable.
+static float deltaLimbAngle(float x0, float y0, float z0,
+                            float t, float pr, float rf, float re) {
+  const float Y = t + y0 - pr;
+  const float Z = z0;
+  const float rho2 = Y * Y + Z * Z;
+  if (rho2 < 1e-6f) return 0.0f;
+  const float M = (re * re - x0 * x0 - rf * rf - rho2) / (2.0f * rf * std::sqrt(rho2));
+  if (M < -1.0f || M > 1.0f) return 0.0f;   // circle miss: keep the limb flat
+  const float phi = std::atan2(Z, Y);
+  const float delta = std::acos(M);
+  float th0 = phi + delta;
+  const float th1 = phi - delta;
+  if (std::fabs(th1) < std::fabs(th0)) th0 = th1;
+  return th0 * kRadToDeg;
+}
+
+// IK: end-effector centre posMM (mm) -> the three motor angles (deg) that put
+// the arm there, using exactly the sim's own joint-frame convention, so the
+// FK of the returned angles reproduces the requested pose.
+static void ikFromPose(const Geom & g, const sf::Vector3f & posMM, float angDeg[3]) {
+  const float x = posMM.x, y = posMM.y, z = posMM.z;
+  for (int leg = 0; leg < 3; ++leg) {
+    const float pa = leg * kTwoPiOver3;
+    const float ca = std::cos(pa), sa = std::sin(pa);
+    const float rx = x * ca + y * sa;
+    const float ry = -x * sa + y * ca;
+    angDeg[leg] = deltaLimbAngle(rx, ry, z, g.t, g.platform_radius,
+                                 g.upper_arm_len, g.lower_arm_len);
+  }
 }
 
 // ── Drawing helpers ───────────────────────────────────────────────────────────
@@ -391,8 +455,10 @@ static void drawLinkage(sf::RenderWindow & w, const Geom & g, int limb, float mo
   // beyond the servo shaft's radius, away from the platform.
   drawLine(w, proj(s, cx, cy), proj(l.e, cx, cy), sf::Color(150, 150, 165), 3.0f);
   // LOWER rod: the single bar from the upper rod's far end to the arm's attach
-  // point (at fixed distance from the arm's base joint).
+  // bracket end (which stands off the arm axis by the attach offset).
   drawLine(w, proj(l.e, cx, cy), proj(l.f, cx, cy), sf::Color(185, 185, 195), 2.0f);
+  // Standoff bracket: from the arm axis to the rod's arm-side socket end.
+  drawLine(w, proj(l.arm, cx, cy), proj(l.f, cx, cy), sf::Color(150, 150, 165), 1.5f);
   // Pins.
   drawDot(w, proj(l.e, cx, cy), 2.2f, sf::Color(90, 90, 100));
   drawDot(w, proj(l.f, cx, cy), 2.2f, sf::Color(90, 90, 100));
@@ -407,14 +473,33 @@ int main(int argc, char **argv) {
   const Geom geom = loadGeometry(*node);
   const double step = node->declare_parameter<double>("step", 0.01);
 
-  // Initial target = the shared sim.initial_pos (also used by the controller),
-  // so the keys move relative to a valid starts pose.
+  // Initial pose = the shared sim.initial_pos (also used by the controller).
+  // The arm BEGINS at the IK solution for that pose instead of the flat/dead
+  // {0,0,0} defaults, so the picture is valid before the first arm/pos msg and
+  // the keys move relative to a start posture.
   const auto init_pos = node->declare_parameter<std::vector<double>>(
     "sim.initial_pos", std::vector<double>{0.0, 0.0, -0.30});
   node->declare_parameter<bool>("sim.simulate_arrival", true);
   double tx = init_pos.size() == 3 ? init_pos[0] : 0.0;
   double ty = init_pos.size() == 3 ? init_pos[1] : 0.0;
   double tz = init_pos.size() == 3 ? init_pos[2] : -0.30;
+
+  // Seed the joint state from the IK of the initial pose (SIM geometry), so the
+  // arm is drawn posed from the first frame; live motor feedback still overrides
+  // it once the driver reports.
+  {
+    const sf::Vector3f initMM(static_cast<float>(tx) * 1000.0f,
+                              static_cast<float>(ty) * 1000.0f,
+                              static_cast<float>(tz) * 1000.0f);
+    float init_ang[3];
+    ikFromPose(geom, initMM, init_ang);
+    node->ang_[0] = init_ang[0];
+    node->ang_[1] = init_ang[1];
+    node->ang_[2] = init_ang[2];
+    node->pos_x_ = tx;
+    node->pos_y_ = ty;
+    node->pos_z_ = tz;
+  }
 
   sf::RenderWindow window(sf::VideoMode(1200, 600), "Delta Arm 2D Sim");
   window.setFramerateLimit(60);

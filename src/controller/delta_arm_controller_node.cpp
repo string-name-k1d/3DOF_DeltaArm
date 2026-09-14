@@ -49,9 +49,10 @@ void DeltaArmControllerNode::declareParams()
   // warnings). Mechanism per arm: servo shaft -> upper rod (single short motor
   // crank / horn) -> lower rod (single RIGID bar of constant length
   // servo_rod_len, solved as a true 4-bar; the crank pin is recomputed each
-  // frame so the rod never stretches) -> upper arm close to the ELBOW
-  // (arm_attach_dist large). The lower arm (elbow->platform) is drawn as 2
-  // parallel bars separated by rod_spread.
+  // frame so the rod never stretches) -> upper arm at the attach bracket
+  // (arm_attach_dist = 70 mm with the shoulders on the base-plate corners).
+  // The lower arm (elbow->platform) is drawn as 2 parallel bars separated by
+  // rod_spread.
   declare_parameter<double>("geometry.servo_radius", 150.0);
   declare_parameter<double>("geometry.servo_z", -25.0);
   declare_parameter<double>("geometry.upper_rod_len", 35.0);

@@ -39,8 +39,8 @@ arm_controller:
 #                          -> the upper arm, at a point at fixed distance from
 #                             the base (actuation) joint.
 # The LOWER ARM (elbow -> platform joint) is drawn as 2 PARALLEL bars.
-# upper_rod_len / arm_attach_dist / rod_spread only shape the visualiser's
-# servo-linkage rendering.
+# upper_rod_len / arm_attach_dist / arm_attach_offset / rod_spread only shape
+# the visualiser's servo-linkage rendering.
 #
 # motor_positions / platform_offsets are optional explicit joint positions in
 # the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2]. When
@@ -59,10 +59,10 @@ arm_controller:
 /**:
   ros__parameters:
     geometry:
-      base_radius: 150.0
-      platform_radius: 60.0
-      upper_arm_len: 160.0
-      lower_arm_len: 200.0
+      base_radius: 100.0
+      platform_radius: 32.5
+      upper_arm_len: 120.0
+      lower_arm_len: 240.0
 
       # Visual-only servo-linkage parameters (visualiser). Mechanism per arm:
       #   servo shaft -> rod "upper"   (a SINGLE crank fixed on the shaft)
@@ -80,20 +80,27 @@ arm_controller:
       # the rod keeps this fixed length (true 4-bar) and never stretches.
       # Range: the crank (upper_rod_len=35) can only reach the rod's far
       # circle for arm angles where |dist(s,f) - servo_rod_len| <= 35;
-      # with 65.5 the solve is exact up to ~59 deg and gracefully clamps toward
-      # the attach point beyond that (instead of drawing a stretching rod).
+      # with 60.0 the solve is exact through the whole deep working zone
+      # (the shoulders sit on the base-plate corners at base_radius, so the
+      # attach bracket stays within reach); shallow (arm-up) poses clamp
+      # gracefully toward the attach point instead of stretching.
       # Raising servo_rod_len moves the reachable band up (deep-arm poses) at
       # the cost of the flat (shallow) ones.
       # arm_attach_dist is the fixed distance from the arm's base joint to the
-      # lower-rod attach point, measured along the arm (kept LARGE so the rod
-      # connects close to the ELBOW, i.e. at a radius well beyond the motor
-      # shaft). rod_spread is the lateral separation of the two parallel bars
-      # of each lower arm.
-      servo_radius: 150.0
-      servo_z: -25.0
+      # lower-rod attach bracket, measured along the arm. With the shoulder on
+      # the base-plate corner circle (base_radius), a bracket far out along the
+      # arm would sit beyond the servo's reach, so this is sized (70 mm) to keep
+      # the rod inside its crank circle across the working sweep. arm_attach_offset
+      # is the PERPENDICULAR standoff of the rod's arm-side socket from the arm
+      # axis (the real bracket gap between the rod's endpoint and the arm).
+      # rod_spread is the lateral separation of the two parallel bars of each
+      # lower arm.
+      servo_radius: 57.65
+      servo_z: -22.5
       upper_rod_len: 35.0
-      servo_rod_len: 65.5
-      arm_attach_dist: 140.0
+      servo_rod_len: 60.0
+      arm_attach_dist: 70.0
+      arm_attach_offset: 20.5
       rod_spread: 8.0
 
     # Simulation behaviour (shared by controller + visualiser):

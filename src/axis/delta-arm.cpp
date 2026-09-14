@@ -19,8 +19,6 @@ namespace {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kDegToRad = 0.017453292519943295f;
 constexpr float kRadToDeg = 57.29577951308232f;
-constexpr float kSqrt3 = 1.7320508075688772f;
-constexpr float kTan30 = 0.5773502691896258f; // 1/sqrt(3)
 constexpr float kCos120 = -0.5f;
 constexpr float kSin120 = 0.8660254037844386f; // sqrt(3)/2
 
@@ -147,12 +145,11 @@ void Arm::ik_stage1(const Vec3& target) {
     const float y = target.y * 1000.0f;
     const float z = target.z * 1000.0f;
 
-    const float f = configs_[0].base_radius * kSqrt3;     // base triangle side
-    const float e = configs_[0].platform_radius * kSqrt3; // effector triangle side
-    // Motor-pivot radius: the motor pivots sit on a circle of radius
-    // (base_edge - effector_edge) * tan(30)/2 from the base axis. This is the
-    // SAME offset the forward kinematics and the visualizer use.
-    const float t = (f - e) * kTan30 / 2.0f;
+    // Shoulder-pivot radius: the arm's base joints sit ON the base-plate
+    // corner circle (base_radius). The effector joints sit at platform_radius,
+    // which is INBOARD of the shoulders (classic delta). Same radii/pivots as
+    // the forward kinematics and the visualizer.
+    const float t = configs_[0].base_radius;
 
     for (int leg = 0; leg < 3; ++leg) {
         // Rotate the target into the limb's frame (the limb's plane becomes the
@@ -192,13 +189,12 @@ void Arm::compute_ik(const Vec3& target) {
  * kinematics, DeltaKin reference).
  */
 Vec3 Arm::forward_kinematics(const float angles_deg[3]) const {
-    // Geometry (same radii/pivots as the IK).
-    const float f = configs_[0].base_radius * kSqrt3;
-    const float e = configs_[0].platform_radius * kSqrt3;
+    // Geometry (same radii/pivots as the IK): the shoulder pivots sit on the
+    // base-plate corner circle in this machine (NOT lowered by (R-r)*tan30/2).
     const float re = configs_[0].lower_arm_len;
 
-    // Motor-pivot radius (as above) and effector triangle radius.
-    const float t = (f - e) * kTan30 / 2.0f;
+    // Shoulder-pivot radius (as above) and effector triangle radius.
+    const float t = configs_[0].base_radius;
     const float pr = configs_[0].platform_radius;
 
     // Limb radial directions (equilateral, one per limb plane). The elbow of a

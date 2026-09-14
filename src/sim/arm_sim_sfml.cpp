@@ -14,11 +14,15 @@ ArmSimSFMLNode::ArmSimSFMLNode(const rclcpp::NodeOptions & options)
     "arm/pos", 10,
     [this](const arm::msg::ArmPosition::SharedPtr msg) { onPosition(msg); });
 
+  fb_sub_ = create_subscription<arm::msg::ArmFeedback>(
+    "arm/motor_feedback", 10,
+    [this](const arm::msg::ArmFeedback::SharedPtr msg) { onFeedback(msg); });
+
   toggle_client_ = create_client<arm::srv::TogglePositionStream>("arm/get_pos");
 
   RCLCPP_INFO(get_logger(),
-              "ArmSim SFML node started - sending arm/set_pos goals and "
-              "drawing arm/pos feedback");
+              "ArmSim SFML node started - sending arm/set_pos goals, drawing "
+              "arm/pos feedback; real arm/motor_feedback overrides the view");
 }
 
 void ArmSimSFMLNode::send_target(double x, double y, double z)
@@ -61,6 +65,27 @@ void ArmSimSFMLNode::onPosition(const arm::msg::ArmPosition::SharedPtr msg)
     ang_[i] = msg->motor_angles_current[i];
   }
   got_pos_ = true;
+}
+
+void ArmSimSFMLNode::onFeedback(const arm::msg::ArmFeedback::SharedPtr msg)
+{
+  for (int i = 0; i < 3; ++i) {
+    fb_ang_[i] = msg->servo_angle_current[i];
+    fb_online_[i] = msg->servo_online[i];
+    fb_error_[i] = msg->servo_error[i];
+  }
+  fb_last_ = now();
+  got_fb_ = true;
+}
+
+bool ArmSimSFMLNode::feedback_live() const
+{
+  if (!got_fb_) return false;
+  if ((now() - fb_last_).seconds() > 0.5) return false;
+  for (int i = 0; i < 3; ++i) {
+    if (fb_online_[i] != 1 || fb_ang_[i] < 0.0f) return false;
+  }
+  return true;
 }
 
 }  // namespace DeltaArmSim

@@ -259,6 +259,46 @@ static LinkPins servoLinkage(const Geom & g, int limb, float motorAngleDeg) {
   return l;
 }
 
+// Forward kinematics from a set of measured/joint motor angles (degrees):
+// intersect the three `lower_arm_len` spheres centered at (elbow - platform
+// offset) to recover the end-effector centre. Returns the DOWNWARD root so the
+// picture matches the real (hanging) arm. False if the three measured angles
+// do not resolve to a valid pose.
+static bool fkFromAngles(const Geom & g, const float angDeg[3], sf::Vector3f & e)
+{
+  sf::Vector3f c[3];
+  for (int i = 0; i < 3; ++i) {
+    const sf::Vector3f el = elbowFromAngle(g, i, angDeg[i]);
+    c[i] = el - g.plat_off[i];
+  }
+  // A = c1 - c0, B = c2 - c0 (plane of the three sphere centres).
+  const sf::Vector3f A = c[1] - c[0];
+  const sf::Vector3f B = c[2] - c[0];
+  const float gAA = A.x * A.x + A.y * A.y + A.z * A.z;
+  const float gBB = B.x * B.x + B.y * B.y + B.z * B.z;
+  const float gAB = A.x * B.x + A.y * B.y + A.z * B.z;
+  const float denom = gAA * gBB - gAB * gAB;   // = |A x B|^2
+  if (denom < 1e-6f) return false;             // degenerate: centres collinear
+
+  // x (relative to c0) = p*A + q*B solves 2 A·x = gAA, 2 B·x = gBB (Cramer).
+  const float p = (0.5f * gAA * gBB - 0.5f * gBB * gAB) / denom;
+  const float q = (0.5f * gBB * gAA - 0.5f * gAA * gAB) / denom;
+  const sf::Vector3f x0(A.x * p + B.x * q, A.y * p + B.y * q, A.z * p + B.z * q);
+
+  // Remaining degree of freedom along n = A x B, chosen so |e - c0| = L.
+  const float n2 = denom;
+  const float disc = g.lower_arm_len * g.lower_arm_len - (x0.x * x0.x + x0.y * x0.y + x0.z * x0.z);
+  if (disc < 0.0f) return false;               // measured pose unreachable
+  const float lam = std::sqrt(disc / n2);
+  const sf::Vector3f n(A.y * B.z - A.z * B.y, A.z * B.x - A.x * B.z, A.x * B.y - A.y * B.x);
+
+  // Two mirror solutions about the centre-plane; keep the one that hangs DOWN.
+  const sf::Vector3f lo = c[0] + x0 + n * lam;
+  const sf::Vector3f hi = c[0] + x0 - n * lam;
+  e = (lo.z < hi.z) ? lo : hi;
+  return true;
+}
+
 // ── Drawing helpers ───────────────────────────────────────────────────────────
 
 static void drawLine(sf::RenderWindow & w,
@@ -427,13 +467,28 @@ int main(int argc, char **argv) {
                sf::Color(160, 160, 160));
       drawText(window, sf::Vector2f(halfW + 10, 10), "Side View (XZ)", font, 16,
                sf::Color(160, 160, 160));
+      drawText(window, sf::Vector2f(10, 30),
+               node->feedback_live()
+                 ? "SOURCE: real servo feedback (arm/motor_feedback)"
+                 : "SOURCE: sim stream (arm/pos)",
+               font, 13,
+               node->feedback_live() ? sf::Color(120, 220, 120) : sf::Color(210, 200, 130));
     }
 
     // ── Read arm state ──────────────────────────────────────────────────
-    const sf::Vector3f e(static_cast<float>(node->pos_x_) * 1000.0f,  // m → mm
-                         static_cast<float>(node->pos_y_) * 1000.0f,
-                         static_cast<float>(node->pos_z_) * 1000.0f);
-    const float ang[3] = {node->ang_[0], node->ang_[1], node->ang_[2]};
+    // When the real motor driver is publishing fresh, all-online feedback,
+    // draw the REAL machine (measured servo angles + FK) instead of the
+    // controller's sim stream (arm/pos).
+    const bool live_fb = node->feedback_live();
+    const float ang[3] = {
+      live_fb ? node->fb_ang_[0] : node->ang_[0],
+      live_fb ? node->fb_ang_[1] : node->ang_[1],
+      live_fb ? node->fb_ang_[2] : node->ang_[2]};
+
+    sf::Vector3f e(static_cast<float>(node->pos_x_) * 1000.0f,  // m → mm
+                   static_cast<float>(node->pos_y_) * 1000.0f,
+                   static_cast<float>(node->pos_z_) * 1000.0f);
+    if (live_fb) fkFromAngles(geom, ang, e);
 
     sf::Vector3f elbow[3], plat[3];
     for (int i = 0; i < 3; ++i) {

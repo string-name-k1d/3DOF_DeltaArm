@@ -149,6 +149,7 @@ at this file automatically; a standalone node can be pointed at it with
 |---|---|---|
 | `feedback_rate` | `20.0` | Continuous `get_pos` stream rate on topic `arm/pos` (Hz). |
 | `feedback_frame` | `base_link` | Coordinate frame attached to published `ArmPosition` messages. |
+| `enable_motion` | `true` | Disable to skip creating the `set_pos` action server — the controller can never produce `arm/motor_targets` (feedback-only runs). |
 
 ### Motor driver (`arm_motor_driver`)
 
@@ -166,6 +167,7 @@ arm's **joint-angle convention** and bounded before they reach the servo:
 | `angle_max` | `[145, 145, 145]` | Physical position limits (deg), **145 = most retracted**. |
 | `max_speed` | `100.0` | Velocity limit (deg/s) used by the servo's trajectory profiling (move interval = dAngle/speed). |
 | `auto_init` | `true` | Ping + sync servos at startup. |
+| `enable_motion` | `true` | Disable to skip the `arm/motor_targets` subscription entirely — motors can never be commanded (feedback-only runs). Ping/telemetry still work. |
 | `feedback_rate` | `10.0` | Periodic servo-bus feedback rate on `arm/motor_feedback` (Hz). |
 | `feedback_frame` | `base_link` | Frame ID of the feedback messages. |
 
@@ -198,6 +200,7 @@ configured for trajectory profiling on every servo at construction.
 | Motor driver        | `arm_motor_driver`  | Bridges ROS messages to the FashionStar bus-servo hardware (`fsuartservo`). |
 | Combined (HW)       | `arm_system`        | Controller + Motor driver, one process (default for real hardware).     |
 | Manual control      | `arm_manual`        | Keyboard (WASD) jogging of `set_pos`; prints `get_pos` position changes. |
+| 2-D visualiser      | `arm_sim_sfml`       | SFML top/side view of the arm. Draws the `arm/pos` stream; when the real driver's `arm/motor_feedback` is fresh and all servos online, it draws the **measured** servos instead (real-machine mirror). |
 
 All topics/services/actions are namespaced under `arm/` in node code, but the
 canonical **ROS-level** names (used by clients in other packages) are listed
@@ -284,6 +287,7 @@ docker compose run --rm arm bash
 | **Motor driver alone** (bus-servo HW)  | `ros2 run arm arm_motor_driver --ros-args --params-file config/arm_params.yaml` |
 | **Controller only** (sim/external drv) | `ros2 launch arm delta_arm.launch simulation:=true`            |
 | **Full system** (controller+driver HW) | `ros2 launch arm delta_arm.launch`                             |
+| **Feedback only** (HW, no motion)      | `ros2 launch arm delta_arm.launch motion:=false`               |
 | **Manual WASD jog** (sim)              | `ros2 launch arm manual.launch`                                |
 | **Manual WASD jog** (hardware)         | `ros2 launch arm manual.launch simulation:=false`              |
 | **Unit tests**                         | `ros2 launch arm test.launch.py`                               |
@@ -293,6 +297,17 @@ docker compose run --rm arm bash
 ```bash
 ros2 launch arm delta_arm.launch                      # controller + driver (one process)
 ros2 launch arm delta_arm.launch simulation:=false    # force hardware
+
+# Feedback-only: boot the full stack but disable all motion (servos will not
+# move). The driver opens the port, pings the servos, and publishes the
+# periodic arm/motor_feedback topic. Nothing is commanded.
+ros2 launch arm delta_arm.launch motion:=false
+
+# Then in a second terminal, watch the servo bus feedback:
+ros2 topic echo arm/motor_feedback
+# or do a one-shot query of servo 0's joint angle (request_type 0):
+ros2 service call arm/motor_param_query arm/srv/MotorParamQuery \
+    "{servo_id: 0, request_type: 0}"
 ```
 
 ### Simulation (no motor driver)
@@ -306,6 +321,30 @@ driver is **not** run — the arm simulation is provided externally over the
 same topic/service/action names (`arm/set_pos`, `arm/motor_targets`, `arm/pos`,
 `arm/get_pos`). Because the interface is identical, the controller code needs no
 changes between simulation and hardware.
+
+### 2-D visualiser (`arm_sim_sfml`)
+
+```bash
+ros2 launch arm arm_sim_2d.launch.py            # controller (sim) + SFML window
+# ...or together with the real hardware stack:
+ros2 launch arm delta_arm.launch motion:=true   # real controller + motor driver
+ros2 launch arm arm_sim_2d.launch.py            # SFML window only (see below)
+```
+
+The SFML window shows the **top view (XY)** and **side view (XZ)** of the arm
+with two sources:
+
+* **sim stream** — the controller's `arm/pos` endpoint (default);
+* **live servo feedback** — while the real driver is publishing fresh
+  `arm/motor_feedback` with all three servos **online**, the top-left status
+  turns green ("SOURCE: real servo feedback") and the arm is redrawn from the
+  **measured** servo angles via FK, so the window mirrors the physical machine
+  servo-by-servo. It drops back to the sim stream if any servo is offline or
+  feedback stops for more than 0.5 s.
+
+For a real-hardware mirror run both launches above in separate terminals; WASD
+then jogs the physical arm through the same `arm/set_pos` action the manual node
+uses.
 
 ### One-time serial setup (WSL2 USB→container bridge)
 

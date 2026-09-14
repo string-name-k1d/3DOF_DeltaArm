@@ -68,6 +68,7 @@ private:
   bool streaming_;
   bool estop_active_;
   bool simulate_arrival_;
+  bool enable_motion_;
 };
 
 }  // namespace DeltaArmRos

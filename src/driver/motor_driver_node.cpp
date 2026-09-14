@@ -1,5 +1,7 @@
 #include "arm/motor_driver_node.hpp"
 
+#include <unistd.h>
+
 #include <chrono>
 
 namespace DeltaArmDriverNode
@@ -18,6 +20,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions & options)
   const int baudrate = get_parameter("baudrate").as_int();
   const auto servo_ids = get_parameter("servo_ids").as_integer_array();
   const bool auto_init = get_parameter("auto_init").as_bool();
+  enable_motion_ = get_parameter("enable_motion").as_bool();
   const auto angle_min = get_parameter("angle_min").as_double_array();
   const auto angle_max = get_parameter("angle_max").as_double_array();
   const auto start_angles = get_parameter("start_angles").as_double_array();
@@ -35,14 +38,37 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions & options)
   }
   config.max_speed = static_cast<float>(max_speed);
 
-  driver_ = std::make_shared<DeltaArmDriver::MotorDriver>(port, baudrate, ids, config);
+  // Pre-flight the serial device. The FashionStar SDK calls exit(-1) if the
+  // port cannot be opened (FashionStar_UartServoProtocol.cpp), so avoid
+  // constructing it when the device is missing - degrade to offline feedback.
+  const bool port_ok = (access(port.c_str(), F_OK | R_OK | W_OK) == 0);
+  if (!port_ok) {
+    RCLCPP_WARN(get_logger(),
+                "serial device %s not present/accessible - continuing in "
+                "feedback-only mode with all servos reported offline. "
+                "Connect the bus-servo adapter and relaunch for live feedback.",
+                port.c_str());
+    driver_ = nullptr;
+  } else {
+    driver_ = std::make_shared<DeltaArmDriver::MotorDriver>(port, baudrate, ids, config);
+  }
 
-  if (auto_init) {
-    if (driver_->init()) {
+  if (driver_ && auto_init) {
+    bool ok = false;
+    try {
+      ok = driver_->init();
+    } catch (...) {
+      ok = false;
+    }
+    if (ok) {
       RCLCPP_INFO(get_logger(), "motor driver initialized on %s (%d baud)", port.c_str(), baudrate);
       for (int i = 0; i < 3; ++i) {
         bool online = false;
-        driver_->ping(i, &online);
+        try {
+          driver_->ping(i, &online);
+        } catch (...) {
+          online = false;
+        }
         online_[i] = online ? 1 : 0;
         if (!online) handleServoFault(i, 2);
       }
@@ -51,12 +77,20 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions & options)
                   "motor driver could not sync all servos on %s - is the adapter connected?",
                   port.c_str());
       for (int i = 0; i < 3; ++i) handleServoFault(i, 2);
+      RCLCPP_WARN(get_logger(),
+                  "continuing in feedback-only mode (servos reported offline)");
     }
   }
 
-  target_sub_ = create_subscription<arm::msg::MotorTargets>(
-    "arm/motor_targets", 10,
-    std::bind(&MotorDriverNode::onMotorTargets, this, std::placeholders::_1));
+  if (enable_motion_) {
+    target_sub_ = create_subscription<arm::msg::MotorTargets>(
+      "arm/motor_targets", 10,
+      std::bind(&MotorDriverNode::onMotorTargets, this, std::placeholders::_1));
+  } else {
+    RCLCPP_INFO(get_logger(),
+                "motion control DISABLED (enable_motion=false) - "
+                "arm/motor_targets subscription not started");
+  }
 
   query_srv_ = create_service<arm::srv::MotorParamQuery>(
     "arm/motor_param_query",
@@ -89,6 +123,7 @@ void MotorDriverNode::declareParams()
   // Velocity limit (deg/s) used for the on-servo trajectory profiling.
   declare_parameter<double>("max_speed", 100.0);
   declare_parameter<bool>("auto_init", true);
+  declare_parameter<bool>("enable_motion", true);
   declare_parameter<double>("feedback_rate", 10.0);
   declare_parameter<std::string>("feedback_frame", "base_link");
 }
@@ -104,9 +139,15 @@ void MotorDriverNode::onParamQuery(
   const std::shared_ptr<arm::srv::MotorParamQuery::Request> request,
   const std::shared_ptr<arm::srv::MotorParamQuery::Response> response)
 {
-  std::lock_guard<std::mutex> lock(bus_mutex_);
   response->response_type = request->request_type;
   response->value = 0;
+  if (!driver_) {
+    response->success = false;
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                         "motor param query ignored - no serial device open");
+    return;
+  }
+  std::lock_guard<std::mutex> lock(bus_mutex_);
   response->success = driver_->query(
     request->servo_id, request->request_type,
     &response->response_type, &response->value);
@@ -129,6 +170,18 @@ void MotorDriverNode::publishFeedback()
   auto msg = std::make_shared<arm::msg::ArmFeedback>();
   msg->header.stamp = now();
   msg->header.frame_id = feedback_frame_;
+
+  if (!driver_) {
+    for (int i = 0; i < 3; ++i) {
+      online_[i] = 0;
+      error_[i] = 2;  // offline (no serial device)
+      msg->servo_online[i] = online_[i];
+      msg->servo_error[i] = error_[i];
+      msg->servo_angle_current[i] = -1.0f;
+    }
+    feedback_pub_->publish(*msg);
+    return;
+  }
 
   std::lock_guard<std::mutex> lock(bus_mutex_);
   for (int i = 0; i < 3; ++i) {

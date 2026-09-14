@@ -3,32 +3,54 @@
   Delta-arm launch.
 
   Modes:
-    * Real hardware (default):   launches arm_system, which runs the
-      controller node AND the motor-driver node in one process (tight coupling
-      between the ROS application and the serial-bus hardware).
+    * Full hardware (default):   motion:=true launches arm_system (controller
+      + motor driver, one process). set_pos goals drive the real servos.
 
-    * Simulation:               simulation:=true  launches ONLY the controller
+    * Feedback-only hardware:    motion:=false launches both controller and
+      motor driver as separate processes, but with motion DISABLED (no set_pos
+      action, no arm/motor_targets subscription). Use to verify communication
+      and read servo feedback (arm/motor_feedback) without moving anything.
+
+    * Simulation:                simulation:=true launches ONLY the controller
       node (arm_controller). The motor driver is NOT started.
 
   Usage:
-    ros2 launch arm delta_arm.launch                     (hardware)
-    ros2 launch arm delta_arm.launch simulation:=true    (simulation)
+    ros2 launch arm delta_arm.launch                            (full hardware)
+    ros2 launch arm delta_arm.launch motion:=false               (feedback only)
+    ros2 launch arm delta_arm.launch simulation:=true            (simulation)
 -->
 <launch>
-  <!-- simulation:=true  -> run the controller only (no motor driver) -->
   <arg name="simulation" default="false"/>
+  <arg name="motion" default="true"/>
   <arg name="params_file"
        default="$(find-pkg-share arm)/config/arm_params.yaml"/>
 
-  <!-- Real hardware: controller + driver, tightly coupled in one process. -->
-  <node pkg="arm" exec="arm_system" name="arm_system"
-        output="screen" unless="$(var simulation)">
-    <param from="$(var params_file)"/>
-  </node>
+  <!-- Full hardware (motion enabled): controller + driver in one process. -->
+  <group if="$(var motion)">
+    <node pkg="arm" exec="arm_system" name="arm_system" output="screen"
+          unless="$(var simulation)">
+      <param from="$(var params_file)"/>
+    </node>
+  </group>
 
-  <!-- Simulation: controller only; the motor driver is started separately. -->
-  <node pkg="arm" exec="arm_controller" name="arm_controller"
-        output="screen" if="$(var simulation)">
+  <!-- Feedback-only hardware (motion disabled): run the two nodes separately
+       so each can receive enable_motion=false via the param override. -->
+  <group unless="$(var motion)">
+    <group unless="$(var simulation)">
+      <node pkg="arm" exec="arm_controller" name="arm_controller" output="screen">
+        <param from="$(var params_file)"/>
+        <param name="enable_motion" value="false"/>
+      </node>
+      <node pkg="arm" exec="arm_motor_driver" name="arm_motor_driver" output="screen">
+        <param from="$(var params_file)"/>
+        <param name="enable_motion" value="false"/>
+      </node>
+    </group>
+  </group>
+
+  <!-- Simulation: controller only; the motor driver is NOT started. -->
+  <node pkg="arm" exec="arm_controller" name="arm_controller" output="screen"
+        if="$(var simulation)">
     <param from="$(var params_file)"/>
   </node>
 </launch>

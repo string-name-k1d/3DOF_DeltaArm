@@ -45,6 +45,7 @@ private:
   std::string feedback_frame_;
   int8_t online_[3];
   int8_t error_[3];
+  bool enable_motion_;
 
   /// Guards all access to driver_ : the node runs on a MultiThreadedExecutor,
   /// so the feedback timer and the motor-targets subscription / query service

@@ -14,6 +14,9 @@ arm_controller:
     feedback_rate: 20.0
     # Coordinate frame attached to the published ArmPosition messages.
     feedback_frame: "base_link"
+    # Enable task-space motion: when false the set_pos action server is NOT
+    # started, so no motor_targets can ever be produced (feedback-only run).
+    enable_motion: true
 
 # ============================================================================
 # Shared delta-arm mechanism geometry (millimetres).
@@ -127,6 +130,10 @@ arm_motor_driver:
     max_speed: 100.0
     # Whether the driver should ping + sync servos at startup.
     auto_init: true
+    # Enable motor actuation: when false the arm/motor_targets subscription is
+    # NOT started, so the servos can never be commanded to move (feedback-only
+    # run; ping/telemetry still work).
+    enable_motion: true
 
 arm_manual_control:
   ros__parameters:

@@ -13,7 +13,8 @@ DeltaArmControllerNode::DeltaArmControllerNode(const rclcpp::NodeOptions & optio
     feedback_frame_("base_link"),
     streaming_(false),
     estop_active_(false),
-    simulate_arrival_(true)
+    simulate_arrival_(true),
+    enable_motion_(true)
 {
   declareParams();
   setupActionServer();
@@ -59,6 +60,7 @@ void DeltaArmControllerNode::declareParams()
   declare_parameter<double>("geometry.rod_spread", 8.0);
 
   simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
+  enable_motion_ = declare_parameter<bool>("enable_motion", true);
   const auto initial = declare_parameter<std::vector<double>>("sim.initial_pos", std::vector<double>{0.0, 0.0, -0.30});
 
   std::vector<DeltaArm::ArmMechConfig> configs;
@@ -99,6 +101,12 @@ void DeltaArmControllerNode::declareParams()
 void DeltaArmControllerNode::setupActionServer()
 {
   motor_pub_ = create_publisher<arm::msg::MotorTargets>("arm/motor_targets", 10);
+
+  if (!enable_motion_) {
+    RCLCPP_INFO(get_logger(),
+                "motion control DISABLED (enable_motion=false) - set_pos action not started");
+    return;
+  }
 
   action_server_ = rclcpp_action::create_server<SetPosition>(
     this,

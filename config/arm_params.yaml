@@ -1,151 +1,126 @@
 # ============================================================================
 # My Arm configuration.
 #
-# Two nodes run inside the "arm_system" executable (or standalone): each
-# reads its own ROS parameter namespace below. Load with:
-#   ros2 run arm arm_system --ros-args \
-#       --params-file config/arm_params.yaml
+# Loaded by the arm_controller / arm_system nodes:
+#   ros2 run arm arm_system --ros-args --params-file config/arm_params.yaml
 # (the launch files point at this file automatically).
 # ============================================================================
 
 arm_controller:
   ros__parameters:
-    # Continuous get_pos stream rate on topic "arm/pos" (Hz).
+    # feedback_rate: continuous get_pos stream rate on topic "arm/pos" (Hz).
     feedback_rate: 20.0
-    # Coordinate frame attached to the published ArmPosition messages.
+    # feedback_frame: coordinate frame attached to the published ArmPosition
+    #   messages.
     feedback_frame: "base_link"
-    # Enable task-space motion: when false the set_pos action server is NOT
-    # started, so no motor_targets can ever be produced (feedback-only run).
+    # enable_motion: enable task-space motion. When false the set_pos action
+    #   server is NOT started, so no motor_targets can ever be produced
+    #   (feedback-only run).
     enable_motion: true
 
 # ============================================================================
-# Shared delta-arm mechanism geometry (millimetres).
-#
-# The "geometry" parameters are read by BOTH the controller (kinematics) and
-# the 2-D SFML visualiser (rendering). The "/**" glob makes them visible to
-# every node started from this file.
-#
-# * base_radius   : circumradius of the equilateral triangle through the three
-#                   SERVO pivots (the base-plate vertices). servo_radius defaults
-#                   to this value when not set.
-# * platform_radius: circumradius of the equilateral triangle through the three
-#                   lower-rod end joints on the effector platform.
-# * upper_arm_len : arm actuation joint -> elbow  (the "upper arm", rf)
-# * lower_arm_len : elbow -> platform joint  (the "lower rod", re)
-#
-# Each arm is driven by its own servo at a base-plate vertex. Servo linkage
-# (visual):  servo shaft -> "upper" rod (single bar)
-#                          -> "lower" rod (single bar)
-#                          -> the upper arm, at a point at fixed distance from
-#                             the base (actuation) joint.
-# The LOWER ARM (elbow -> platform joint) is drawn as 2 PARALLEL bars.
-# upper_rod_len / arm_attach_dist / arm_attach_offset / rod_spread only shape
-# the visualiser's servo-linkage rendering.
-#
-# motor_positions / platform_offsets are optional explicit joint positions in
-# the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2]. When
-# absent they are derived from the two radii: an equilateral set spaced 120 deg
-# apart, matching the delta-arm FK / Gazebo model. The effector triangle is
-# INVERTED (apex-down): each platform joint sits on the SAME radial as its
-# motor, which is the orientation the IK/FK solve for. The derived values for
-# the default radii above are:
-#   arm actuation joints: (0,-45,0)  (38.97,22.5,0)  (-38.97,22.5,0)
-#   platform joints:      (0,-60,0)  (51.96,30,0)    (-51.96,30,0)
-#   servo pivots:         (0,-150,25) (129.9,75,25)   (-129.9,75,25)
-# To override them, uncomment and edit:
-#   motor_positions: [0.0, -45.0, 0.0,  38.97, 22.5, 0.0,  -38.97, 22.5, 0.0]
-#   platform_offsets: [0.0, -60.0, 0.0,  51.96, 30.0, 0.0,  -51.96, 30.0, 0.0]
+# Shared delta-arm mechanism geometry (read by BOTH the controller kinematics
+# and the 2-D SFML visualiser rendering). The "/**" glob makes the block below
+# visible to every node started from this file.
 # ============================================================================
 /**:
   ros__parameters:
     geometry:
+      # base_radius: circumradius (mm) of the equilateral triangle through the
+      #   three base-plate vertices. The arm shoulders (J joints) sit ON this
+      #   circle in this machine (classic delta), so it is the shoulder-pivot
+      #   radius used by the IK/FK.
       base_radius: 100.0
+      # platform_radius: circumradius (mm) of the equilateral triangle through
+      #   the three lower-rod end joints on the effector platform (P joints).
       platform_radius: 32.5
+      # upper_arm_len: arm actuation joint -> elbow rod length (mm) (rf).
       upper_arm_len: 120.0
+      # lower_arm_len: elbow -> platform joint rod length (mm) (re).
       lower_arm_len: 240.0
 
-      # Visual-only servo-linkage parameters (visualiser). Mechanism per arm:
-      #   servo shaft -> rod "upper"   (a SINGLE crank fixed on the shaft)
-      #               -> rod "lower"   (a SINGLE RIGID rod)
-      #               -> the upper arm, at a point near the ELBOW.
-      # The LOWER ARM (elbow -> platform joint) is drawn as 2 PARALLEL bars.
-      # servo_radius is the circumradius of the servo output shafts; it
-      # defaults to base_radius. The servos are mounted UNDER the base plate,
-      # so servo_z < 0 puts the whole linkage below the plate, up to the arm's
-      # attach point. upper_rod_len is the SHORT motor crank (servo horn)
-      # fixed to the shaft, pointing OUTWARD (its pin sits beyond the servo
-      # shaft's radius, further from the platform).
-      # servo_rod_len is the CONSTANT length of the rigid connecting rod
-      # (crank pin -> arm attach point): the crank pin is solved each frame so
-      # the rod keeps this fixed length (true 4-bar) and never stretches.
-      # Range: the crank (upper_rod_len=35) can only reach the rod's far
-      # circle for arm angles where |dist(s,f) - servo_rod_len| <= 35;
-      # with 60.0 the solve is exact through the whole deep working zone
-      # (the shoulders sit on the base-plate corners at base_radius, so the
-      # attach bracket stays within reach); shallow (arm-up) poses clamp
-      # gracefully toward the attach point instead of stretching.
-      # Raising servo_rod_len moves the reachable band up (deep-arm poses) at
-      # the cost of the flat (shallow) ones.
-      # arm_attach_dist is the fixed distance from the arm's base joint to the
-      # lower-rod attach bracket, measured along the arm. With the shoulder on
-      # the base-plate corner circle (base_radius), a bracket far out along the
-      # arm would sit beyond the servo's reach, so this is sized (70 mm) to keep
-      # the rod inside its crank circle across the working sweep. arm_attach_offset
-      # is the PERPENDICULAR standoff of the rod's arm-side socket from the arm
-      # axis (the real bracket gap between the rod's endpoint and the arm).
-      # rod_spread is the lateral separation of the two parallel bars of each
-      # lower arm.
+      # servo_radius: circumradius (mm) of the three servo output shafts (S
+      #   joints). The servos mount UNDER the base plate (so servo_z < 0 puts
+      #   the whole linkage below it), closer to the platform centre than the
+      #   arm shoulders at base_radius.
       servo_radius: 57.65
+      # servo_z: height (mm) of the servo output shafts below the pivot plane.
       servo_z: -22.5
-      upper_rod_len: 35.0
-      servo_rod_len: 60.0
-      arm_attach_dist: 70.0
+      # upper_rod_len: length (mm) of the SERVO HORN (the short motor crank
+      #   fixed to the servo shaft; gear stage 1 side of the linkage).
+      upper_rod_len: 60.0
+      # servo_rod_len: length (mm) of the RIGID connecting rod between the
+      #   crank pin and the arm attach bracket. The crank pin is solved every
+      #   frame so this rod keeps its constant length (true 4-bar) — it never
+      #   stretches or shrinks.
+      servo_rod_len: 35.0
+      # arm_attach_dist: fixed distance (mm) from the arm's base joint to the
+      #   lower-rod attach bracket, measured ALONG the arm.
+      arm_attach_dist: 98.5
+      # arm_attach_offset: PERPENDICULAR standoff (mm) of the rod's arm-side
+      #   ball socket from the arm axis (the real bracket gap between the rod
+      #   endpoint and the arm).
       arm_attach_offset: 20.5
+      # rod_spread: lateral separation (mm) of the two parallel bars of each
+      #   lower arm (elbow -> platform), visual only.
       rod_spread: 8.0
 
-    # Simulation behaviour (shared by controller + visualiser):
-    #   initial_pos:      the arm's start posture (meters). Must be IK-reachable
-    #                     (the controller commands it on startup, so the arm
-    #                     never begins at the degenerate (0,0,0)).
-    #   simulate_arrival: in sim mode the controller promotes each set_pos goal
-    #                     to the current pose immediately (no motor driver).
+      # motor_positions / platform_offsets: optional explicit joint positions
+      #   in the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2].
+      #   When absent they are derived from base_radius / platform_radius: an
+      #   equilateral set spaced 120 deg apart, matching the delta-arm FK. The
+      #   effector triangle is INVERTED (apex-down): each platform joint sits on
+      #   the SAME radial as its motor (the orientation the IK/FK solve for).
+      #   To override, uncomment and edit, e.g.:
+      #   motor_positions: [0.0, -100.0, 0.0,  86.6, 50.0, 0.0,  -86.6, 50.0, 0.0]
+      #   platform_offsets: [0.0, -32.5, 0.0,  28.15, 16.25, 0.0,  -28.15, 16.25, 0.0]
+
+    # Initial-pose / simulation behaviour (shared by controller + visualiser).
     sim:
-      initial_pos: [0.0, 0.0, -0.30]
+      # initial_pos: the arm's start posture (metres). Must be IK-reachable
+      #   (the controller commands it on startup, so the arm never begins at
+      #   the degenerate (0,0,0)). The visualiser seeds its drawn pose from the
+      #   IK of this point too.
+      initial_pos: [0.0, 0.0, -0.20]
+      # simulate_arrival: in sim mode the controller promotes each set_pos goal
+      #   to the current pose immediately (no motor driver in the loop).
       simulate_arrival: true
 
 arm_motor_driver:
   ros__parameters:
-    # UART/serial port of the FashionStar bus-servo adapter.
-    # Linux: "/dev/ttyUSB0"   Windows: "COM8"
+    # port_name: UART/serial port of the FashionStar bus-servo adapter.
+    #   Linux: "/dev/ttyUSB0"   Windows: "COM8"   (only one of them active).
     port_name: "/dev/ttyUSB0"
-    # port_name: "COM8"
+    # baudrate: UART baud rate of the bus-servo adapter.
     baudrate: 115200
-    # Binary ids of the three delta-arm actuators.
+    # servo_ids: binary ids of the three delta-arm actuators, one per limb.
     servo_ids: [0, 1, 2]
-    # Installation offset (deg) per motor: the physical servo angle when the
-    # joint sits at the arm's zero/home pose. A commanded joint angle is sent
-    # as joint + start_angles, so start_angles IS the per-motor installation
-    # offset of the servos.
+    # start_angles: installation offset (deg) per motor — the physical servo
+    #   angle when the joint sits at the arm's zero/home pose. A commanded
+    #   joint angle is sent as joint + start_angles.
     start_angles: [0.0, 0.0, 0.0]
-    # Physical position limits (deg) per motor. Control outputs are clamped into
-    # this range before they reach the servo: 0 = limb fully extended (away from
-    # the centre), 145 = most retracted.
+    # angle_min: lower physical position limit (deg) per motor. Control outputs
+    #   are clamped into [angle_min, angle_max] before reaching the servo.
     angle_min: [0.0, 0.0, 0.0]
+    # angle_max: upper physical position limit (deg) per motor. 0 = limb fully
+    #   extended (away from the centre), 145 = most retracted.
     angle_max: [145.0, 145.0, 145.0]
-    # Velocity limit (deg/s) used by the servo's trajectory profiling when it
-    # interpolates between the current and the commanded angle.
+    # max_speed: velocity limit (deg/s) used by the servo's trajectory
+    #   profiling when it interpolates current -> commanded angle.
     max_speed: 100.0
-    # Whether the driver should ping + sync servos at startup.
+    # auto_init: whether the driver should ping + sync the servos at startup.
     auto_init: true
-    # Enable motor actuation: when false the arm/motor_targets subscription is
-    # NOT started, so the servos can never be commanded to move (feedback-only
-    # run; ping/telemetry still work).
+    # enable_motion: enable motor actuation. When false the arm/motor_targets
+    #   subscription is NOT started, so the servos can never be commanded to
+    #   move (feedback-only run; ping/telemetry still work).
     enable_motion: true
 
 arm_manual_control:
   ros__parameters:
-    # Manual-control step size and which components WASD drives.
+    # step: manual-control step size (m) applied per key press on the driven
+    #   axis.
     step: 0.01
+    # axis0: component of the target position the first key pair drives ("z").
     axis0: "z"
+    # axis1: component of the target position the second key pair drives ("y").
     axis1: "y"
-

@@ -2,8 +2,8 @@
 # stop_sim.sh — stop any running arm simulation/controller processes (2-D SFML,
 # 3-D Gazebo or real-hardware stack) inside the container.
 #
-# Called automatically by run_arm_sim_2d.sh before each (re)launch so a fresh
-# launch never clashes on ROS node names (e.g. two /arm_controller nodes). Being
+# Called automatically by the host ./run_arm.sh before each (re)launch so a
+# fresh launch never clashes on ROS node names (e.g. two /arm_controller nodes). Being
 # a script FILE (not an inline `bash -lc` command) keeps the "ros2 launch arm"
 # pkill pattern from matching this script's own command line.
 #
@@ -13,12 +13,18 @@
 set +e
 
 # Executables (2-D SFML, controller, manual, real-HW, Gazebo). SIGKILL so an
-# ignored SIGTERM can never leave an orphaned window/node behind.
+# ignored SIGTERM can never leave an orphaned window/node behind. The kernel
+# truncates some comm() names (e.g. "arm_motor_drive"), so also kill by the
+# full install path which never truncates.
 pkill -9 -x arm_controller
 pkill -9 -x arm_sim_sfml
 pkill -9 -x arm_manual
 pkill -9 -x arm_system
 pkill -9 -x arm_motor_driver
+pkill -9 -f "install/arm/lib/arm/arm_motor_driver"
+pkill -9 -f "install/arm/lib/arm/arm_sim_sfml"
+pkill -9 -f "install/arm/lib/arm/arm_controller"
+pkill -9 -f "install/arm/lib/arm/arm_manual"
 pkill -9 -x gzserver
 pkill -9 -x gzclient
 sleep 1

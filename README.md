@@ -329,6 +329,11 @@ ros2 launch arm arm_sim_2d.launch.py            # controller (sim) + SFML window
 # ...or together with the real hardware stack:
 ros2 launch arm delta_arm.launch motion:=true   # real controller + motor driver
 ros2 launch arm arm_sim_2d.launch.py            # SFML window only (see below)
+ros2 launch arm arm_sim_2d.launch.py motor:=true   # driver + controller + window
+ros2 launch arm arm_sim_2d.launch.py motor:=true control:=false
+#   feedback-only VISUALISATION: driver runs enable_motion=false (no
+#   arm/motor_targets subscription, nothing can move) and the window draws the
+#   measured servo angles. No controller node is started.
 ```
 
 The SFML window shows the **top view (XY)** and **side view (XZ)** of the arm
@@ -342,9 +347,9 @@ with two sources:
   servo-by-servo. It drops back to the sim stream if any servo is offline or
   feedback stops for more than 0.5 s.
 
-For a real-hardware mirror run both launches above in separate terminals; WASD
-then jogs the physical arm through the same `arm/set_pos` action the manual node
-uses.
+For a real-hardware mirror run `motor:=true` (from `run_arm.sh --view 2d
+--mode motor`; add `--control on`/`control:=true` for WASD to jog the physical
+arm through the same `arm/set_pos` action the manual node uses).
 
 ### One-time serial setup (WSL2 USB→container bridge)
 

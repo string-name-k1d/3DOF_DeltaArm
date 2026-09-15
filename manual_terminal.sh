@@ -4,7 +4,7 @@
 # Runs the arm_manual node connected to the arm controller that the arm_gazebo
 # launch started (action /arm/set_pos + position stream /arm/get_pos). Intended
 # to be started inside an interactive container terminal (docker exec -it); the
-# run_arm_sim.sh script auto-opens such a terminal on Windows Terminal.
+# host ./run_arm.sh --view 3d auto-opens such a terminal on Windows Terminal.
 #
 #   W/S : +/- z    A/D : +/- y     Q : quit
 

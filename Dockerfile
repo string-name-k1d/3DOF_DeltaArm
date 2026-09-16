@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Serial/USB utilities & hardware access libraries
     usbutils \
     minicom \
+    x11-utils \
     libusb-1.0-0-dev \
     libudev-dev \
     udev \
@@ -49,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # model/robot-state packages) so the arm simulation can run in the container.
 # gazebo_ros_pkgs pulls in gazebo_ros, gazebo_ros2_control, gazebo_plugins, etc.
 # libglm-dev is the math library the Gazebo sim (src/sim arm_sim_gazebo) uses.
+# libsfml-dev builds the optional 2-D SFML simulator (arm_sim_sfml).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gazebo \
     ros-humble-gazebo-ros-pkgs \
@@ -56,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-joint-state-publisher \
     ros-humble-controller-manager \
     libglm-dev \
+    libsfml-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the ROS 2 to WebSocket bridge (rosbridge_suite): lets web browsers /

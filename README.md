@@ -59,8 +59,7 @@ workspace/package).
 ├── test/                            # GTest unit tests (test_delta_arm.cpp)
 ├── motor_driver/                    # FashionStart C++ SDK (git submodule) -> fsuartservo + cserialport
 ├── run_arm.sh                       # container launcher (HW default; "simulation" arg; dev shell)
-├── compose.yaml                     # docker compose defaults (root container, HW config, TTY)
-├── compose.sim.yaml                 # simulation override (clears HW bits, runs controller only)
+├── compose.yaml                     # docker compose (root container, TTY, HW device binding)
 ├── gazebo/                          # SEPARATE package `arm_gazebo` (Gazebo sim)
 │   ├── package.xml
 │   ├── CMakeLists.txt
@@ -108,10 +107,9 @@ docker compose build arm
 
 > **`compose.yaml`** bakes in the always-needed `docker run` arguments (the
 > container runs as **root**, the repo is mounted at `/root/ws`, interactive
-> TTY) plus the hardware configuration (**USB serial binding** and **dialout
-> group**), so no ad-hoc CLI flags are needed. The default launch is the **real
-> hardware** arm; the pure-simulation launch requires the extra
-> `-f compose.sim.yaml` override file (see [5. Launch](#5-launch)).
+> TTY) plus the hardware device binding, so no ad-hoc CLI flags are needed.
+> Which part runs (real hardware vs simulation) is chosen **at launch with an
+> entrypoint argument**, not with a separate compose file — see [5. Launch](#5-launch).
 
 ### Build the package (colcon) inside the container
 
@@ -259,24 +257,26 @@ below.
 
 Everything below runs **inside the container** after
 `source install/setup.bash` (see [2. Setup](#2-setup)). Start the container
-with the compose defaults. The default launch is the **real hardware** arm;
-simulation requires the extra `-f compose.sim.yaml` flag:
+with the compose defaults; the part to run is sent as the **first argument to
+the `run_arm.sh` entrypoint** (`simulation` for the controller-only sim, no
+argument for real hardware, `bash` for a shell):
 
 ```bash
 # Real hardware (default) - controller + motor driver; USB serial and dialout
 # group are already configured in compose.yaml:
 docker compose run --rm arm
 
-# Simulation - controller only (arm sim provided externally), no serial config:
-docker compose -f compose.yaml -f compose.sim.yaml run --rm arm
+# Simulation - controller only (arm sim provided externally):
+docker compose run --rm arm simulation
 
 # Interactive shell / build inside the repo-mounted workspace:
 docker compose run --rm arm bash
 ```
 
 > On a host without the serial adapter attached, `compose.yaml` cannot bind
-> `/dev/ttyUSB0` — use the simulation override for shells/builds too:
-> `docker compose -f compose.yaml -f compose.sim.yaml run --rm arm bash`.
+> `/dev/ttyUSB0` — point the bind somewhere harmless for shells/sims:
+> `SERIAL_DEVICE=/dev/null docker compose run --rm arm simulation` (or use the
+> wrapped workflow in the parent workspace, which hot-plugs the device).
 >
 > The USB serial path is configurable without touching the docker files:
 > `SERIAL_DEVICE=/dev/ttyUSB1 docker compose run --rm arm` (default

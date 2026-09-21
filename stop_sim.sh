@@ -27,12 +27,19 @@ pkill -9 -f "install/arm/lib/arm/arm_controller"
 pkill -9 -f "install/arm/lib/arm/arm_manual"
 pkill -9 -x gzserver
 pkill -9 -x gzclient
+# Gazebo Harmonic (gz-sim 8) server + the arm_gazebo launch stack.
+pkill -9 -f "[g]z sim"
+pkill -9 -f "install/arm_gazebo/lib/arm_gazebo/arm_cmd_bridge"
+pkill -9 -f "lib/ros_gz_sim/create"
+pkill -9 -f "lib/ros_gz_bridge/parameter_bridge"
+pkill -9 -x robot_state_publisher
 sleep 1
 
 # ros2 launch wrapper processes left behind by the above (child death makes
 # them exit on their own, but kill them anyway so the DDS graph goes quiet).
 pkill -9 -f "ros2 launch arm"
 pkill -9 -f "arm_sim_2d.launch.py"
+pkill -9 -f "arm_gazebo.launch.py"
 pkill -9 -f "arm_sim_sfml --ros-args"
 sleep 1
 

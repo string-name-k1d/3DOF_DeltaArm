@@ -1,0 +1,98 @@
+<?xml version="1.0"?>
+<!--
+  delta_arm.gazebo.xacro — Gazebo (Harmonic / gz-sim 8) elements for the
+  delta arm: runtime loop-closure welds (DetachableJoint), shoulder position
+  controllers (JointPositionController) and actuated-joint state publisher.
+
+  Included by delta_arm.urdf.xacro.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Keep the fixed tip joints so the DetachableJoint weld has a target. -->
+  <gazebo reference="tip_0_joint">
+    <preserveFixedJoint>true</preserveFixedJoint>
+  </gazebo>
+  <gazebo reference="tip_1_joint">
+    <preserveFixedJoint>true</preserveFixedJoint>
+  </gazebo>
+  <gazebo reference="tip_2_joint">
+    <preserveFixedJoint>true</preserveFixedJoint>
+  </gazebo>
+
+  <!-- Close the three kinematic loops at load time: weld tip_i <-> dummy_i. -->
+  <gazebo>
+    <plugin filename="libgz-sim-detachable-joint-system.so"
+            name="gz::sim::systems::DetachableJoint">
+      <parent_link>tip_0</parent_link>
+      <child_model>delta_arm</child_model>
+      <child_link>dummy_0</child_link>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="libgz-sim-detachable-joint-system.so"
+            name="gz::sim::systems::DetachableJoint">
+      <parent_link>tip_1</parent_link>
+      <child_model>delta_arm</child_model>
+      <child_link>dummy_1</child_link>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="libgz-sim-detachable-joint-system.so"
+            name="gz::sim::systems::DetachableJoint">
+      <parent_link>tip_2</parent_link>
+      <child_model>delta_arm</child_model>
+      <child_link>dummy_2</child_link>
+    </plugin>
+  </gazebo>
+
+  <!-- Actuated shoulders: position servo over /cmd_pos (radians). -->
+  <gazebo>
+    <plugin filename="libgz-sim-joint-position-controller-system.so"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>shoulder_0</joint_name>
+      <topic>/delta_arm/shoulder_0/cmd_pos</topic>
+      <p_gain>150</p_gain>
+      <i_gain>2.0</i_gain>
+      <d_gain>10</d_gain>
+      <i_max>5</i_max>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="libgz-sim-joint-position-controller-system.so"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>shoulder_1</joint_name>
+      <topic>/delta_arm/shoulder_1/cmd_pos</topic>
+      <p_gain>150</p_gain>
+      <i_gain>2.0</i_gain>
+      <d_gain>10</d_gain>
+      <i_max>5</i_max>
+    </plugin>
+  </gazebo>
+
+  <gazebo>
+    <plugin filename="libgz-sim-joint-position-controller-system.so"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>shoulder_2</joint_name>
+      <topic>/delta_arm/shoulder_2/cmd_pos</topic>
+      <p_gain>150</p_gain>
+      <i_gain>2.0</i_gain>
+      <d_gain>10</d_gain>
+      <i_max>5</i_max>
+    </plugin>
+  </gazebo>
+
+  <!-- Report ONLY the actuated shoulders (mimics real encoders). -->
+  <gazebo>
+    <plugin filename="libgz-sim-joint-state-publisher-system.so"
+            name="gz::sim::systems::JointStatePublisher">
+      <joint_name>shoulder_0</joint_name>
+      <joint_name>shoulder_1</joint_name>
+      <joint_name>shoulder_2</joint_name>
+      <update_rate>100</update_rate>
+    </plugin>
+  </gazebo>
+
+</robot>

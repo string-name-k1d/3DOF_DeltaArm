@@ -2,14 +2,15 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd"?>
 <package format="3">
   <name>arm_gazebo</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>
-    Gazebo (Classic) 3D simulation for the 3DOF delta arm. This independent
-    package hosts everything Gazebo: the arm_sim_gazebo node that bridges the
-    arm controller's joint commands (arm/motor_targets) into a simulated
-    delta-arm model with joint feedback (arm/joints, arm/pos), plus the Gazebo
-    world / URDF model / meshes / launch files. Kept fully separate from the
-    core `arm` package (which talks to real hardware).
+    Gazebo Harmonic (gz-sim 8) closed-loop simulation for the 3-DoF delta arm.
+    This independent package hosts everything Gazebo: the URDF model of the
+    delta mechanism (open kinematic tree with DetachableJoint runtime loop
+    closure), the DART/pgs world, the arm_cmd_bridge node that feeds the arm
+    controller's joint commands (arm/motor_targets, degrees) to the simulated
+    shoulder servos (cmd_pos, radians), and the launch files. Kept fully
+    separate from the core `arm` package (which talks to real hardware).
   </description>
   <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
   <license>Apache-2.0</license>
@@ -18,21 +19,13 @@
 
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
-  <depend>geometry_msgs</depend>
-  <depend>sensor_msgs</depend>
   <depend>arm</depend>
 
-  <build_depend>gazebo</build_depend>
-  <build_depend>gazebo_ros</build_depend>
-  <exec_depend>gazebo</exec_depend>
-  <exec_depend>gazebo_ros</exec_depend>
-  <exec_depend>gazebo_ros2_control</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend>
-  <exec_depend>joint_state_publisher</exec_depend>
-  <exec_depend>controller_manager</exec_depend>
   <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>ros2launch</exec_depend>
-  <exec_depend>libglm-dev</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

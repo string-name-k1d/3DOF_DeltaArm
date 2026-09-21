@@ -63,9 +63,10 @@ workspace/package).
 ├── gazebo/                          # SEPARATE package `arm_gazebo` (Gazebo sim)
 │   ├── package.xml
 │   ├── CMakeLists.txt
-│   ├── src/                         # delta_arm_gazebo_plugin (model plugin)
-│   ├── launch/                      # arm_gazebo.launch.py (sim + optional WASD)
-│   ├── worlds/                      # delta_arm.world
+│   ├── src/                         # arm_cmd_bridge (deg targets -> shoulder cmd_pos)
+│   ├── launch/                      # arm_gazebo.launch.py (world + create + bridge + nodes)
+│   ├── urdf/                        # delta_arm.urdf.xacro (+ .gazebo.xacro plugins)
+│   ├── worlds/                      # arm_world.sdf (DART/pgs)
 │   └── config/
 └── Dockerfile                       # ROS 2 Humble build container (USB/serial for HW access)
 ```
@@ -446,24 +447,25 @@ ros2 run arm arm_manual --ros-args \
 
 ## Component: Gazebo Simulation (`arm_gazebo`)
 
-The optional 3D Gazebo sim is a **separate package** under `gazebo/` (see
+The optional 3-D Gazebo sim is a **separate package** under `gazebo/` (see
 `AGENT.md §6`). It provides the simulation-side model that fills in for the
 motor driver when the controller runs in `simulation:=true`.
 
-The sim is a **model plugin** (`delta_arm_gazebo_plugin` in
-`worlds/delta_arm.world`): a closed-loop delta-arm model whose shoulder joints
-are servoed by a PD+I torque controller on the upper-arm links. It subscribes
-the controller's `arm/motor_targets` (degrees) and is verified to track the
-commanded angles to well under a degree. Because a Gazebo/ODE loop joint rejects
-kinematic `SetPosition`, the plugin drives the mechanism with body torques
-instead (`AddRelativeTorque`); gains are SDF-configurable (`kp`/`ki`/`kd`/
-`tau_max`).
+It targets **Gazebo Harmonic (gz-sim 8)**: the delta arm is a URDF **open
+kinematic tree** (`urdf/delta_arm.urdf.xacro` + `delta_arm.gazebo.xacro`)
+whose three leg loops are closed at runtime by `DetachableJoint` plugin welds
+(tip ↔ dummy). Each shoulder is servoed by a `JointPositionController`
+(subscribes `/delta_arm/shoulder_<i>/cmd_pos`, radians); the `arm_cmd_bridge`
+node feeds it from the controller's `arm/motor_targets` (degrees). Physics is
+DART `pgs` in `worlds/arm_world.sdf`; joint state is bridged over
+`parameter_bridge` to ROS `/joint_states`.
 
-Launch it (after building `arm` and `arm_gazebo` as siblings) with:
+Navigation/notes:
 
 ```bash
+docker exec arm_sim bash /root/ros2_ws/src/arm/scripts/install_gazebo_harmonic.sh   # once per container
 ros2 launch arm_gazebo arm_gazebo.launch.py                     # headless
-ros2 launch arm_gazebo arm_gazebo.launch.py gui:=true           # + Gzclient GUI
+ros2 launch arm_gazebo arm_gazebo.launch.py gui:=true           # + Gazebo GUI
 ros2 launch arm_gazebo arm_gazebo.launch.py manual:=true        # + WASD terminal
 ```
 

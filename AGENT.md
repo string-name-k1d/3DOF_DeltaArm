@@ -104,26 +104,35 @@ delta-arm kinematics from `arm` instead of recompiling it.
   workspace's `src/` (e.g. symlink `src/arm` → repo and `src/arm_gazebo` →
   `gazebo/`), then `colcon build` there. `arm_gazebo` depends on `arm`, so
   colcon orders it correctly.
-- The 3-D world is generated **at launch time** from the parameterised xacro
-  descriptor `gazebo/urdf/delta_arm.world.xacro` (SDF-format: `<sdf
-  xmlns:xacro=...>`); `arm_gazebo.launch.py` runs `xacro <desc> -o
-  /tmp/delta_arm.generated.world` before starting gzserver. `gazebo/worlds/
-  delta_arm.world` is a committed copy of that output (regenerate with
-  `xacro gazebo/urdf/delta_arm.world.xacro -o gazebo/worlds/delta_arm.world`).
-- The xacro uses the SAME mechanism parameters and IK/FK maths as the 2-D sim
+- The 3-D model is generated **at launch time** from the URDF xacro
+  descriptors `gazebo/urdf/delta_arm.urdf.xacro` (+ the plugin block in
+  `delta_arm.gazebo.xacro`); `arm_gazebo.launch.py` runs `xacro` to a robot
+  description and spawns it into `gazebo/worlds/arm_world.sdf` (DART `pgs`).
+- The model uses the SAME mechanism parameters and IK/FK maths as the 2-D sim
   (shared `geometry` values in `arm/config/arm_params.yaml`): shoulder pivots
-  at t = 45 mm, upper arms 160 mm (revolute, actuated), lower rods 200 mm
-  (ball joints at both ends → closed loop), platform radius 60 mm hanging
-  below the base, servo housings under the plate at 150 mm. The
-  `delta_arm_gazebo_plugin` subscribes to `arm/motor_targets` (deg) and PD+I
-  servoes the three shoulders; end-to-end it reproduces the IK angles (e.g.
-  initial pose (0,0,-0.30) → 5.17°/5.17°/5.17°, settled within ~1 mrad).
-  Targets that need a negative arm angle swing the upper arm UP into the base
-  plate (solid disc in the model) → self-blocking; the nominal workspace is
-  positive arm angles (servo range [0, 145] deg).
-- `gazebo_ros` / `glm` are found via `find_package(... QUIET)` and the
-  `arm_sim_gazebo` executable is only built when they are present, so a
-  headless build of `arm` stays unaffected.
+  at `base_radius` = 100 mm, upper arms `upper_arm_len` = 120 mm (revolute,
+  actuated), lower rods `lower_arm_len` = 240 mm, platform at
+  `platform_radius` = 32.5 mm hanging below the base. The mechanism is an
+  **open kinematic tree** — each leg is an elbow/wrist pair of 3-revolute
+  (X,Y,Z) chains whose rod tip is welded to the platform dummy at runtime by a
+  `DetachableJoint` plugin, closing the three loops in physics. Each shoulder
+  is servoed by a `JointPositionController` on `/delta_arm/shoulder_<i>/cmd_pos`
+  (rad); the `arm_cmd_bridge` node maps the controller's `arm/motor_targets`
+  (deg) onto those three topics (and publishes zeros shortly after start so
+  the servos latch the home pose). Verified: commands track (e.g. 20°/-10°/5°
+  → ≈0.38/-0.11/0.13 rad at the joints) and the platform follows in 3-D
+  (tool0 moves with asymmetric commands); the shoulders rest a few degrees
+  off zero (~0.117 rad) — the soft static equilibrium of the pgs-closed loop,
+  not a true home error. Targets needing a negative arm angle swing the upper
+  arm UP into the base plate (solid disc in the model) → self-blocking; the
+  nominal workspace is positive arm angles (servo range [0, 145] deg).
+- The Harmonic stack is NOT baked into `arm:latest`; install it on demand with
+  `arm/scripts/install_gazebo_harmonic.sh` (OSRF repo + gz-harmonic +
+  `ros-humble-ros-gzharmonic` + `robot_state_publisher`). The `--view 3d`
+  launcher (`run_arm.sh`) detects a missing install and prints this command.
+- The legacy Classic/torque-plugin path (`delta_arm_gazebo_plugin`,
+  `arm_sim_gazebo`, `worlds/delta_arm.world`) was removed in the Harmonic
+  rewrite.
 
 ### Verify the sibling build (Docker)
 ```bash

@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 ENV LANG=en_US.UTF-8
 
-# Install system utilities, build tools, and USB/serial communication utilities
+# System utilities, build tools, and USB/serial communication utilities.
+# libsfml-dev builds the 2-D SFML simulator (arm_sim_sfml), the default view.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg2 \
@@ -29,13 +30,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libusb-1.0-0-dev \
     libudev-dev \
     udev \
+    libsfml-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Add the official ROS 2 GPG key and APT repository
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu jammy main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
-# Install ROS 2 Humble Base + rosdep + colcon
+# ROS 2 Humble Base + build tooling. rclcpp-action is used by the arm
+# controller/manual nodes (SetPosition action); ament-cmake-gtest builds the
+# test suite in arm/test. Gazebo/rosbridge are NOT baked in anymore: they are
+# optional and installed on demand (see arm/scripts/install_gazebo_harmonic.sh
+# and arm/scripts/install_rosbridge.sh), keeping the image small.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-ros-base \
     ros-humble-rclcpp-action \
@@ -44,27 +50,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-dev-tools \
     python3-colcon-common-extensions \
     python3-rosdep \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Gazebo Classic (11) + the gazebo_ros_pkgs ROS 2 bridge (and related
-# model/robot-state packages) so the arm simulation can run in the container.
-# gazebo_ros_pkgs pulls in gazebo_ros, gazebo_ros2_control, gazebo_plugins, etc.
-# libglm-dev is the math library the Gazebo sim (src/sim arm_sim_gazebo) uses.
-# libsfml-dev builds the optional 2-D SFML simulator (arm_sim_sfml).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gazebo \
-    ros-humble-gazebo-ros-pkgs \
-    ros-humble-robot-state-publisher \
-    ros-humble-joint-state-publisher \
-    ros-humble-controller-manager \
-    libglm-dev \
-    libsfml-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install the ROS 2 to WebSocket bridge (rosbridge_suite): lets web browsers /
-# external clients talk to the ROS 2 graph from the container (default port 9090).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ros-humble-rosbridge-suite \
     && rm -rf /var/lib/apt/lists/*
 
 # Initialize rosdep for workspace dependency management

@@ -1,0 +1,351 @@
+<?xml version="1.0"?>
+<!--
+  delta_arm.urdf.xacro — 3-DoF delta arm as an OPEN kinematic tree, ready for
+  runtime loop closure with Gazebo Harmonic (gz-sim 8).
+
+  Following the closed-loop pattern of
+  https://github.com/LevinTamir/ros2_closed_loop_ws (3dof_delta):
+
+    * each leg is an open chain: shoulder (revolute, actuated) -> upper arm ->
+      elbow spherical (top_A/B/C) -> lower rod -> tip link.
+    * the platform hangs from a passive 3-prismatic chain
+      (tool_px -> tool_py -> tool0), keeping it level with exactly 3
+      translational DOF.
+    * a per-leg spherical closure chain (cl_A/B/C) on tool0 ends in a dummy
+      link that coincides with the leg's tip at the home pose; the gazebo
+      DetachableJoint system welds tip <-> dummy at load time, closing the
+      loop in the physics engine.
+
+  The joint numbers / mount-frame convention are IDENTICAL to the old Gazebo
+  Classic world descriptor and to the FK in arm/src/axis/delta-arm.cpp:
+
+    * leg i sits at radius base_radius, its plane rotated by yaw (0/120/240);
+      shoulder axis is +X of the mount frame; at joint angle 0 the upper arm
+      points horizontally outward and a POSITIVE angle swings it DOWNWARD.
+
+  Geometry is driven by the SAME mechanism parameters as the 2-D simulator
+  (values in config/arm_params.yaml -> "geometry", converted to metres):
+
+      base_radius     t  = 0.100 m   shoulder pivot radius
+      platform_radius pr = 0.0325 m  platform joint radius
+      upper_arm_len   rf = 0.120 m   shoulder -> elbow
+      lower_arm_len   re = 0.240 m   elbow -> platform rod
+
+  Derived constants (verified by hand):
+    * platform rest drop d = sqrt(re^2 - (t + rf - pr)^2) = 0.149812 m
+    * rod direction at rest in the mount frame: (0, +0.1875, -0.149812)/0.24
+      = (0, +0.78125, -0.624218)  -> elbow pitch about X = -0.6742 rad
+    * wrist closure chain points the other way: pitch = +2.4674 rad.
+-->
+<robot name="delta_arm" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ==================== PARAMETERS ==================== -->
+  <xacro:property name="t"          value="0.100" />     <!-- pivot radius  -->
+  <xacro:property name="pr"         value="0.0325" />    <!-- platform radius -->
+  <xacro:property name="rf"         value="0.120" />     <!-- upper arm length -->
+  <xacro:property name="re"         value="0.240" />     <!-- lower rod length -->
+  <xacro:property name="drop"       value="0.149812" />  <!-- platform rest drop -->
+  <xacro:property name="elbow_pitch" value="-0.6742" />  <!-- rod home bend -->
+  <xacro:property name="wrist_pitch" value="2.4674" />   <!-- closure home bend -->
+  <xacro:property name="base_z"     value="0.90" />      <!-- base plane height above ground -->
+
+  <!-- Leg geometry: shoulder bases on radius t, yaw 0/120/240 deg. -->
+  <xacro:property name="px0" value="0.0"            />
+  <xacro:property name="py0" value="-0.100"         />
+  <xacro:property name="y0"  value="0.0"            />
+  <xacro:property name="px1" value="0.086602540"    />
+  <xacro:property name="py1" value="0.050"          />
+  <xacro:property name="y1"  value="2.094395102"    />
+  <xacro:property name="px2" value="-0.086602540"   />
+  <xacro:property name="py2" value="0.050"          />
+  <xacro:property name="y2"  value="4.188790205"    />
+
+  <!-- Platform joint points (same radials as the shoulders), in the tool0 rest frame. -->
+  <xacro:property name="jx0" value="0.0"           />
+  <xacro:property name="jy0" value="-0.0325"       />
+  <xacro:property name="jx1" value="0.028145826"   />
+  <xacro:property name="jy1" value="0.01625"       />
+  <xacro:property name="jx2" value="-0.028145826"  />
+  <xacro:property name="jy2" value="0.01625"       />
+
+  <!-- ==================== WORLD / BASE ==================== -->
+  <link name="world"/>
+
+  <joint name="world_to_base" type="fixed">
+    <origin xyz="0 0 ${base_z}" rpy="0 0 0"/>
+    <parent link="world"/>
+    <child link="base_link"/>
+  </joint>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.010" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.130" length="0.020"/>
+      </geometry>
+      <material name="base_mat">
+        <color rgba="0.30 0.30 0.32 1.0"/>
+      </material>
+    </visual>
+    <!-- motor shoulder markers on the base plate -->
+    <visual>
+      <origin xyz="${px0} ${py0} 0.016" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.05 0.032"/></geometry>
+      <material name="motor_mat">
+        <color rgba="0.22 0.32 0.62 1.0"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="${px1} ${py1} 0.016" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.05 0.032"/></geometry>
+      <material name="motor_mat2">
+        <color rgba="0.22 0.32 0.62 1.0"/>
+      </material>
+    </visual>
+    <visual>
+      <origin xyz="${px2} ${py2} 0.016" rpy="0 0 0"/>
+      <geometry><box size="0.05 0.05 0.032"/></geometry>
+      <material name="motor_mat3">
+        <color rgba="0.22 0.32 0.62 1.0"/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="1.0"/>
+      <origin xyz="0 0 0.010" rpy="0 0 0"/>
+      <inertia ixx="3.633e-3" ixy="0" ixz="0" iyy="3.633e-3" iyz="0" izz="7.2e-3"/>
+    </inertial>
+  </link>
+
+  <!-- ===================== LEG MACRO ===================== -->
+  <xacro:macro name="delta_leg" params="idx px py yaw">
+    <!-- Mount: fixed link rotating the limb plane by yaw around the centre axis. -->
+    <link name="mount_${idx}">
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="mount_${idx}_fixed" type="fixed">
+      <origin xyz="${px} ${py} 0" rpy="0 0 ${yaw}"/>
+      <parent link="base_link"/>
+      <child link="mount_${idx}"/>
+    </joint>
+
+    <!-- Actuated shoulder: axis +X of mount, q=0 horizontal outward, +q downward. -->
+    <link name="upper_arm_${idx}">
+      <visual>
+        <origin xyz="0 ${-rf / 2} 0" rpy="1.5707963 0 0"/>
+        <geometry>
+          <cylinder radius="0.012" length="${rf}"/>
+        </geometry>
+        <material name="arm_mat_${idx}">
+          <color rgba="0.80 0.60 0.15 1.0"/>
+        </material>
+      </visual>
+      <inertial>
+        <mass value="0.08"/>
+        <origin xyz="0 ${-rf / 2} 0" rpy="0 0 0"/>
+        <inertia ixx="9.9e-5" ixy="0" ixz="0" iyy="5.8e-6" iyz="0" izz="9.9e-5"/>
+      </inertial>
+    </link>
+    <joint name="shoulder_${idx}" type="revolute">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="mount_${idx}"/>
+      <child link="upper_arm_${idx}"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="20.0" lower="-1.2" upper="1.2" velocity="6.28"/>
+      <dynamics damping="0.1" friction="0.0"/>
+    </joint>
+
+    <!-- Elbow ball joint as a 3-revolute spherical chain (home bend = elbow_pitch). -->
+    <link name="top_v1_${idx}">
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="top_A_${idx}" type="revolute">
+      <origin xyz="0 ${-rf} 0" rpy="${elbow_pitch} 0 0"/>
+      <parent link="upper_arm_${idx}"/>
+      <child link="top_v1_${idx}"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="1.0" lower="-3.14159" upper="3.14159" velocity="1.0"/>
+    </joint>
+
+    <link name="top_v2_${idx}">
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="top_B_${idx}" type="revolute">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="top_v1_${idx}"/>
+      <child link="top_v2_${idx}"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="1.0" lower="-3.14159" upper="3.14159" velocity="1.0"/>
+    </joint>
+
+    <!-- Lower rod reaches from the elbow to the platform joint (tip at the end). -->
+    <link name="rod_${idx}">
+      <visual>
+        <origin xyz="0 ${re / 2} 0" rpy="1.5707963 0 0"/>
+        <geometry>
+          <cylinder radius="0.010" length="${re}"/>
+        </geometry>
+        <material name="rod_mat_${idx}">
+          <color rgba="0.70 0.72 0.75 1.0"/>
+        </material>
+      </visual>
+      <inertial>
+        <mass value="0.12"/>
+        <origin xyz="0 ${re / 2} 0" rpy="0 0 0"/>
+        <inertia ixx="5.8e-4" ixy="0" ixz="0" iyy="6e-6" iyz="0" izz="5.8e-4"/>
+      </inertial>
+    </link>
+    <joint name="top_C_${idx}" type="revolute">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="top_v2_${idx}"/>
+      <child link="rod_${idx}"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="1.0" lower="-3.14159" upper="3.14159" velocity="1.0"/>
+    </joint>
+
+    <!-- Tip link: weld target at the rod end (its fixed joint is preserved). -->
+    <link name="tip_${idx}">
+      <visual>
+        <origin xyz="0 ${re} 0" rpy="0 0 0"/>
+        <geometry>
+          <sphere radius="0.013"/>
+        </geometry>
+        <material name="tip_mat_${idx}">
+          <color rgba="0.85 0.30 0.25 1.0"/>
+        </material>
+      </visual>
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="tip_${idx}_joint" type="fixed">
+      <origin xyz="0 ${re} 0" rpy="0 0 0"/>
+      <parent link="rod_${idx}"/>
+      <child link="tip_${idx}"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- ============ PLATFORM (passive 3-prismatic level chain) ============ -->
+  <link name="tool_px">
+    <inertial>
+      <mass value="0.001"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+  </link>
+  <joint name="tool_px_joint" type="prismatic">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="tool_px"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1.0" lower="-0.25" upper="0.25" velocity="1.0"/>
+    <dynamics damping="0.05" friction="0.0"/>
+  </joint>
+
+  <link name="tool_py">
+    <inertial>
+      <mass value="0.001"/>
+      <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+    </inertial>
+  </link>
+  <joint name="tool_py_joint" type="prismatic">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="tool_px"/>
+    <child link="tool_py"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="1.0" lower="-0.25" upper="0.25" velocity="1.0"/>
+    <dynamics damping="0.05" friction="0.0"/>
+  </joint>
+
+  <!-- The platform itself (tool0). Its rest frame sits at the rest drop. -->
+  <link name="tool0">
+    <visual>
+      <origin xyz="0 0 0.005" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.045" length="0.012"/>
+      </geometry>
+      <material name="plat_mat">
+        <color rgba="0.10 0.55 0.30 1.0"/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="0.15"/>
+      <origin xyz="0 0 0.006" rpy="0 0 0"/>
+      <inertia ixx="8.5e-5" ixy="0" ixz="0" iyy="8.5e-5" iyz="0" izz="1.6e-4"/>
+    </inertial>
+  </link>
+  <joint name="tool0_joint" type="prismatic">
+    <origin xyz="0 0 ${-drop}" rpy="0 0 0"/>
+    <parent link="tool_py"/>
+    <child link="tool0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1.0" lower="-0.30" upper="-0.02" velocity="1.0"/>
+    <dynamics damping="0.05" friction="0.0"/>
+  </joint>
+
+  <!-- ============ CLOSURE CHAIN MACRO (wrist spherical on tool0) ============ -->
+  <xacro:macro name="closure_chain" params="idx jx jy yaw">
+    <!-- Ends in a dummy link coincident with tip_${idx} at the home pose. -->
+    <link name="cl_v1_${idx}">
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="cl_A_${idx}" type="revolute">
+      <origin xyz="${jx} ${jy} 0" rpy="${wrist_pitch} 0 ${yaw}"/>
+      <parent link="tool0"/>
+      <child link="cl_v1_${idx}"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="1.0" lower="-3.14159" upper="3.14159" velocity="1.0"/>
+    </joint>
+
+    <link name="cl_v2_${idx}">
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="cl_B_${idx}" type="revolute">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="cl_v1_${idx}"/>
+      <child link="cl_v2_${idx}"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="1.0" lower="-3.14159" upper="3.14159" velocity="1.0"/>
+    </joint>
+
+    <link name="dummy_${idx}">
+      <inertial>
+        <mass value="0.001"/>
+        <inertia ixx="1e-7" ixy="0" ixz="0" iyy="1e-7" iyz="0" izz="1e-7"/>
+      </inertial>
+    </link>
+    <joint name="cl_C_${idx}" type="revolute">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="cl_v2_${idx}"/>
+      <child link="dummy_${idx}"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="1.0" lower="-3.14159" upper="3.14159" velocity="1.0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- ==================== INSTANTIATE ==================== -->
+  <xacro:delta_leg idx="0" px="${px0}" py="${py0}" yaw="${y0}"/>
+  <xacro:delta_leg idx="1" px="${px1}" py="${py1}" yaw="${y1}"/>
+  <xacro:delta_leg idx="2" px="${px2}" py="${py2}" yaw="${y2}"/>
+
+  <xacro:closure_chain idx="0" jx="${jx0}" jy="${jy0}" yaw="${y0}"/>
+  <xacro:closure_chain idx="1" jx="${jx1}" jy="${jy1}" yaw="${y1}"/>
+  <xacro:closure_chain idx="2" jx="${jx2}" jy="${jy2}" yaw="${y2}"/>
+
+  <!-- Gazebo physics plugins: loop closure welds + joint controllers. -->
+  <xacro:include filename="delta_arm.gazebo.xacro"/>
+</robot>

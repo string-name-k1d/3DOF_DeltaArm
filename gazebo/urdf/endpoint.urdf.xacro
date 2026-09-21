@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<!--
+  endpoint.urdf.xacro — SIMPLIFIED payload for the "endpoint-only" attached
+  simulator. Replaces the full 3-DoF delta mechanism with a rigid stand-in
+  that carries ONLY the two frames that matter for the combined drone+arm
+  system (world: the PX4 drone's apriltag1, run under `./sim.sh single`):
+
+      base_link   (what the runtime weld attaches to the drone)
+      tool0       (the arm's payload-carrying point, fixed BELOW base)
+
+  It deliberately DOES NOT reproduce the closed-loop mechanism internals:
+  shoulder JointPositionController servos, spherical elbow/wrist chains, the
+  parallel 3-prismatic platform chain, DetachableJoint loop-closure welds or
+  the IK/controller stack in arm/src. That keeps the sim cheap and
+  side-effect-free (no loop topologies that can jitter) while ROS 2 still gets
+  the useful bits:
+
+      * robot_state_publisher + TF :  base_link -> tool0 (fixed)
+      * /joint_states              :  the single fixed tool0_joint
+
+  Extension path: swap tool0_joint (and the fixed mount below) for 3 prismatic
+  joints driven by JointPositionController to make the endpoint positionable —
+  still with NO closed-loop kinematics, so IK-free.
+
+  Run this payload with single mode and endpoint payload (./sim.sh single,
+see README), or set ARM_PAYLOAD=endpoint before run_arm.sh with view 3d and
+attach mode; the arm connects via the mount weld (launch/mount_welder.py).
+-->
+<robot name="delta_arm_endpoint" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- tool0 hangs this far below base_link (≈ the real arm's platform at
+       rest / payload reach underneath the drone). -->
+  <xacro:property name="tool_drop" value="0.20"/>
+
+  <!-- Root link. No `world` link: base_link is welded straight onto the
+       drone by mount_welder.py, so it must be the payload's single root. -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.010" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.130" length="0.020"/>
+      </geometry>
+      <material name="base_mat">
+        <color rgba="0.30 0.30 0.32 1.0"/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="1.0"/>
+      <origin xyz="0 0 0.010" rpy="0 0 0"/>
+      <inertia ixx="3.633e-3" ixy="0" ixz="0" iyy="3.633e-3" iyz="0" izz="7.2e-3"/>
+    </inertial>
+  </link>
+
+  <!-- The endpoint: a rigid platform hanging ${tool_drop} below the base,
+       representing the delta arm's payload-carrying point. -->
+  <link name="tool0">
+    <visual>
+      <origin xyz="0 0 0.005" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.045" length="0.012"/>
+      </geometry>
+      <material name="plat_mat">
+        <color rgba="0.10 0.55 0.30 1.0"/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="0.15"/>
+      <origin xyz="0 0 0.006" rpy="0 0 0"/>
+      <inertia ixx="8.5e-5" ixy="0" ixz="0" iyy="8.5e-5" iyz="0" izz="1.6e-4"/>
+    </inertial>
+  </link>
+  <joint name="tool0_joint" type="fixed">
+    <origin xyz="0 0 -${tool_drop}" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="tool0"/>
+  </joint>
+
+</robot>

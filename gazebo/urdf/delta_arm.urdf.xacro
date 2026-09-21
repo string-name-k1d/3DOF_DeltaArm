@@ -48,6 +48,16 @@
   <xacro:property name="elbow_pitch" value="-0.6742" />  <!-- rod home bend -->
   <xacro:property name="wrist_pitch" value="2.4674" />   <!-- closure home bend -->
   <xacro:property name="base_z"     value="0.90" />      <!-- base plane height above ground -->
+  <!--
+    mount (xacro:arg, default false): true = a "mounted" payload (launched
+    INTO the drone's running gz world and rigidly welded onto it, see
+    launch/mount_welder.py). The fake `world` link + world_to_base anchor are
+    then OMITTED so that base_link is the payload's root with exactly ONE
+    parent (the runtime arm_mount weld). mount=false = the standalone arm
+    (arm_world / `both` mode), anchored at base_z above the origin by the
+    world link, as before. arm_gazebo.launch.py always passes mount explicitly.
+  -->
+  <xacro:arg name="mount" default="false"/>
 
   <!-- Leg geometry: shoulder bases on radius t, yaw 0/120/240 deg. -->
   <xacro:property name="px0" value="0.0"            />
@@ -69,13 +79,18 @@
   <xacro:property name="jy2" value="0.01625"       />
 
   <!-- ==================== WORLD / BASE ==================== -->
-  <link name="world"/>
+  <!-- The standalone arm is anchored at base_z above the world origin. When
+       mounted (mount=true) the weld makes base_link's only parent the drone,
+       so the fake world link is dropped with xacro:unless. -->
+  <xacro:unless value="$(arg mount)">
+    <link name="world"/>
 
-  <joint name="world_to_base" type="fixed">
-    <origin xyz="0 0 ${base_z}" rpy="0 0 0"/>
-    <parent link="world"/>
-    <child link="base_link"/>
-  </joint>
+    <joint name="world_to_base" type="fixed">
+      <origin xyz="0 0 ${base_z}" rpy="0 0 0"/>
+      <parent link="world"/>
+      <child link="base_link"/>
+    </joint>
+  </xacro:unless>
 
   <link name="base_link">
     <visual>

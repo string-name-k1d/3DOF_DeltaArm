@@ -44,6 +44,10 @@ install(TARGETS arm_cmd_bridge
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
+install(PROGRAMS scripts/mount_welder.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
 )

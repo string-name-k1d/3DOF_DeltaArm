@@ -107,7 +107,7 @@ delta-arm kinematics from `arm` instead of recompiling it.
 - The 3-D model is generated **at launch time** from the URDF xacro
   descriptors `gazebo/urdf/delta_arm.urdf.xacro` (+ the plugin block in
   `delta_arm.gazebo.xacro`); `arm_gazebo.launch.py` runs `xacro` to a robot
-  description and spawns it into `gazebo/worlds/arm_world.sdf` (DART `pgs`).
+  description and spawns it into `gazebo/worlds/arm_world.sdf` (ODE).
 - The model uses the SAME mechanism parameters and IK/FK maths as the 2-D sim
   (shared `geometry` values in `arm/config/arm_params.yaml`): shoulder pivots
   at `base_radius` = 100 mm, upper arms `upper_arm_len` = 120 mm (revolute,

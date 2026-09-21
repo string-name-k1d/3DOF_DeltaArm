@@ -2,10 +2,9 @@
 <!--
   arm_world.sdf — Gazebo Harmonic (gz-sim 8) world for the 3-DoF delta arm.
 
-  Physics: DART with the iterative pgs solver. The closed delta is
-  over-constrained (three loops with redundant constraints); the direct
-  dantzig LCP solver jams on it, while pgs is softer but robust. A small step
-  keeps the loop constraints stiff.
+  Physics: ODE (default solver). The closed-loop delta is overconstrained
+  (three loops); ODE handles it without special solver selection. A 4 ms
+  step keeps loop constraints stiff while running at 250 Hz real-time.
 -->
 <sdf version="1.8">
   <world name="arm_world">

@@ -27,18 +27,38 @@ struct Vec3
  * to the end-effector platform. The three limbs are spaced at equal angles
  * around the base's central axis.
  *
+ * The servo drives the arm through a 4-BAR LINKAGE instead of turning the arm
+ * directly: a horn (upper_rod_len) keyed to the servo shaft, a connecting rod
+ * (servo_rod_len) to a bracket on the upper arm (arm_attach_dist along the arm
+ * axis + arm_attach_offset perpendicular standoff). Stage-2 IK solves that
+ * linkage's closed form to map limb angle <-> motor angle.
+ *
  * All lengths are in millimetres; the task-space interface (set_tar_pos) uses
  * metres, which are converted internally to millimetres so the geometry keeps
- * clean whole numbers that match the in-progress CAD (.sldasm) model.
+ * clean whole numbers that match the CAD (.sldasm) model.
  */
 struct ArmMechConfig
 {
-  float base_radius = 150.0f;    // horizontal distance of a servo pivot from
+  float base_radius = 100.0f;    // horizontal distance of a shoulder pivot from
                                  // the base's central axis (mm)
-  float platform_radius = 60.0f; // horizontal distance of a platform joint
+  float platform_radius = 32.5f; // horizontal distance of a platform joint
                                  // from the end-effector axis (mm)
-  float upper_arm_len = 160.0f;  // servo -> arm end (mm)
-  float lower_arm_len = 200.0f;  // arm end -> platform joint rod (mm)
+  float upper_arm_len = 120.0f;  // shoulder -> arm end (elbow) (mm)
+  float lower_arm_len = 240.0f;  // arm end -> platform joint rod (mm)
+
+  float servo_radius = 57.65f;   // horizontal distance of a servo output shaft
+                                 // from the base's central axis (mm)
+  float servo_z = -22.5f;        // servo shaft height BELOW the shoulder plane
+                                 // (mm; mounts under the base plate)
+  float upper_rod_len = 60.0f;   // servo horn: the short crank on the servo
+                                 // shaft (4-bar link `a`, mm)
+  float servo_rod_len = 35.0f;   // rigid connecting rod between horn and arm
+                                 // bracket (4-bar link `b`, mm)
+  float arm_attach_dist = 68.5f; // shoulder -> attach bracket along the arm
+                                 // axis (mm; 4-bar link `c` = hypot of this
+                                 // with arm_attach_offset)
+  float arm_attach_offset = 20.5f; // perpendicular standoff of the rod's
+                                   // arm-side ball socket from the arm axis (mm)
 
   float plane_angle = 0.0f;      // angle (radians) of this limb's vertical
                                  // plane around the base's central axis
@@ -112,7 +132,15 @@ public:
 
   /// @brief Two-stage inverse kinematics.
   void ik_stage1(const Vec3 & target);      ///< task-space -> limb plane orientations
-  float ik_stage2(float theta, int leg);   ///< limb plane orientation -> motor angle
+  float ik_stage2(float theta, int leg);   ///< limb plane orientation -> motor angle (deg)
+
+  /// @brief 4-bar linkage solve: arm angle (rad) -> motor angle (rad), using the
+  ///        closed form (a=horn, b=rod, c=shoulder->socket, d=servo->shoulder).
+  ///        Throws std::invalid_argument when the linkage cannot close.
+  float motor_from_arm(float theta_arm, int leg) const;
+  /// @brief Inverse 4-bar solve: motor angle (rad) -> arm angle (rad). Monotone
+  ///        bisection of the closing band; clamped to the band edges.
+  float arm_from_motor(float motor_rad, int leg) const;
 
   void compute_ik(const Vec3 & target);     ///< runs stage 1 + stage 2, fills tar_angles_
 
@@ -121,8 +149,9 @@ public:
   // (radians). Throws if unreachable.
   float delta_calc_angle_deg(float x0, float y0, float z0, const ArmMechConfig & c) const;
 
-  // Estimate the 3D end-effector position from the current servo angles
-  // (forward kinematics).
+  // Estimate the 3D end-effector position from the current SERVO (motor)
+  // angles (degrees): each motor angle is first converted back to the limb's
+  // upper-arm angle via the 4-bar solve, then the classic delta FK runs.
   Vec3 forward_kinematics(const float angles_deg[3]) const;
 
   std::vector<ArmMechConfig> configs_;

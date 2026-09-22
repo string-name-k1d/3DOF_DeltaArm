@@ -17,6 +17,7 @@ void Motor::set_tar_pos(float pos) { tar_pos = pos; }
 namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
+constexpr float kTwoPi = 6.28318530717958647692f;
 constexpr float kDegToRad = 0.017453292519943295f;
 constexpr float kRadToDeg = 57.29577951308232f;
 constexpr float kCos120 = -0.5f;
@@ -110,10 +111,16 @@ void Arm::init_default_geometry() {
     configs_.clear();
     for (int leg = 0; leg < 3; ++leg) {
         ArmMechConfig c;
-        c.base_radius = 150.0f;    // mm (circumradius of the base triangle)
-        c.platform_radius = 60.0f; // mm (circumradius of the effector triangle)
-        c.upper_arm_len = 160.0f;  // mm
-        c.lower_arm_len = 200.0f;  // mm
+        c.base_radius = 100.0f;     // mm (circumradius of the base triangle)
+        c.platform_radius = 32.5f;  // mm (circumradius of the effector triangle)
+        c.upper_arm_len = 120.0f;   // mm
+        c.lower_arm_len = 240.0f;   // mm
+        c.servo_radius = 57.65f;    // mm (servo shafts under the plate corners)
+        c.servo_z = -22.5f;         // mm (mount below the shoulder plane)
+        c.upper_rod_len = 60.0f;    // mm (servo horn = 4-bar link a)
+        c.servo_rod_len = 35.0f;    // mm (connecting rod = 4-bar link b)
+        c.arm_attach_dist = 68.5f;  // mm (shoulder -> arm bracket, link c)
+        c.arm_attach_offset = 20.5f;// mm (perpendicular bracket standoff)
         c.plane_angle = leg * kTwoPiOver3;
         c.home_offset = 0.0f;
         configs_.push_back(c);
@@ -169,10 +176,99 @@ void Arm::ik_stage1(const Vec3& target) {
 /**
  * STAGE 2 - limb plane orientation -> motor joint angle (degrees).
  *
- * Applies the limb's home/calibration offset and converts to the driver's
- * degrees convention.
+ * The servo does NOT turn the arm directly: it drives a 4-bar linkage, so the
+ * limb angle and motor angle are NON-linear functions of one another. With
+ *   a = horn (upper_rod_len)     b = rod (servo_rod_len)
+ *   c = shoulder->socket         d = servo->shoulder (ground)
+ * and  theta_b = 180 deg - (arm angle), the motor-side horn angle solves
+ *   A = 2 a d cos(theta_b) - 2 b d
+ *   B = 2 a d sin(theta_b)
+ *   C = c^2 - a^2 - b^2 - d^2 + 2 a b cos(theta_b)
+ *   theta_a = atan2(B, A) +- acos( C / |(A,B)| )      (closed form)
+ * The arm-side link is length `c`, so c = hypot(arm_attach_dist,
+ * arm_attach_offset) and the ground link is d = servo->shoulder length.
+ * The "+" acos branch is the physically-continuous one in the closing band.
+ *
+ * The result is folded into the range [0, 2pi) with the convention 0 deg =
+ * limb fully extended and GROWING angle sweeping the arm DOWNWARD (fits the
+ * driver's nominal [0,145] deg range), then the home/calibration offset is
+ * added. Throws when the arm angle cannot be reached through the linkage.
  */
-float Arm::ik_stage2(float theta, int leg) { return (theta * kRadToDeg + configs_[leg].home_offset * kRadToDeg); }
+float Arm::motor_from_arm(float theta_arm, int leg) const {
+    const ArmMechConfig& c = configs_[leg];
+    const float a = c.upper_rod_len;
+    const float b = c.servo_rod_len;
+    const float cc = std::hypot(c.arm_attach_dist, c.arm_attach_offset);
+    const float dd = std::hypot(c.base_radius - c.servo_radius, -c.servo_z);
+
+    // Geometric closure test: the rod (length b) must physically span the
+    // servo shaft and the arm-side socket. Flat arms leave the socket too far
+    // from the servo for the linkage to close even though the algebraic solve
+    // below still returns a number.
+    const float sr = c.base_radius + c.arm_attach_dist * std::cos(theta_arm) - c.arm_attach_offset * std::sin(theta_arm);
+    const float sz = -c.arm_attach_dist * std::sin(theta_arm) - c.arm_attach_offset * std::cos(theta_arm);
+    const float dist = std::hypot(sr - c.servo_radius, sz - c.servo_z);
+    if (dist > a + b + 1e-3f || dist < std::fabs(a - b) - 1e-3f) {
+        throw std::invalid_argument("four-bar linkage cannot close at this arm angle");
+    }
+
+    const float tb = kPi - theta_arm;                     // 180 deg - arm angle
+    const float A = 2.0f * a * dd * std::cos(tb) - 2.0f * b * dd;
+    const float B = 2.0f * a * dd * std::sin(tb);
+    const float C = cc * cc - a * a - b * b - dd * dd + 2.0f * a * b * std::cos(tb);
+    const float R = std::hypot(A, B);
+    const float u = C / R;
+    if (u < -1.0f || u > 1.0f) {
+        throw std::invalid_argument("four-bar linkage cannot close at this arm angle");
+    }
+
+    const float raw = std::atan2(B, A) + std::acos(u);
+    return kTwoPi - raw;                                   // fold into [0, 2pi)
+}
+
+/**
+ * INVERSE 4-bar solve: motor angle (rad) -> arm angle (rad).
+ *
+ * The closed form above is monotone within the linkage's closing band
+ * [band_low, 90 deg] (below band_low the connecting rod cannot physically
+ * close), so the inverse is found by bisection. Motor angles outside the band
+ * are clamped to the nearest edge. Never throws.
+ */
+float Arm::arm_from_motor(float motor_rad, int leg) const {
+    const ArmMechConfig& c = configs_[leg];
+    const float a = c.upper_rod_len;
+    const float b = c.servo_rod_len;
+
+    // Smallest arm angle at which the linkage still closes (rod fully
+    // stretched):  |socket(arm) - servo| == a + b.
+    float lo = 0.0f, hi = kPi / 2.0f;
+    for (int i = 0; i < 48; ++i) {
+        const float mid = 0.5f * (lo + hi);
+        const float t = mid;
+        const float r = c.base_radius + c.arm_attach_dist * std::cos(t) - c.arm_attach_offset * std::sin(t);
+        const float zz = -c.arm_attach_dist * std::sin(t) - c.arm_attach_offset * std::cos(t);
+        const float dist = std::hypot(r - c.servo_radius, zz - c.servo_z);
+        if (dist <= a + b) hi = mid; else lo = mid;
+    }
+    const float band_low = 0.5f * (lo + hi);
+    const float band_high = kPi / 2.0f;
+
+    if (motor_rad <= motor_from_arm(band_low, leg)) return band_low;
+    if (motor_rad >= motor_from_arm(band_high, leg)) return band_high;
+
+    lo = band_low;
+    hi = band_high;
+    for (int i = 0; i < 60; ++i) {
+        const float mid = 0.5f * (lo + hi);
+        if (motor_from_arm(mid, leg) > motor_rad) hi = mid; else lo = mid;
+    }
+    return 0.5f * (lo + hi);
+}
+
+float Arm::ik_stage2(float theta, int leg) {
+    const float motor_rad = motor_from_arm(theta, leg);
+    return (motor_rad + configs_[leg].home_offset) * kRadToDeg;
+}
 
 void Arm::compute_ik(const Vec3& target) {
     ik_stage1(target);
@@ -189,6 +285,14 @@ void Arm::compute_ik(const Vec3& target) {
  * kinematics, DeltaKin reference).
  */
 Vec3 Arm::forward_kinematics(const float angles_deg[3]) const {
+    // Convert the SERVO (motor) angles back to limb//upper-arm angles through
+    // the 4-bar linkage, then run the classic delta FK on the arm angles.
+    float ang_deg[3];
+    for (int i = 0; i < 3; ++i) {
+        const float motor_rad = angles_deg[i] * kDegToRad - configs_[i].home_offset;
+        ang_deg[i] = arm_from_motor(motor_rad, i) * kRadToDeg;
+    }
+
     // Geometry (same radii/pivots as the IK): the shoulder pivots sit on the
     // base-plate corner circle in this machine (NOT lowered by (R-r)*tan30/2).
     const float re = configs_[0].lower_arm_len;
@@ -201,9 +305,9 @@ Vec3 Arm::forward_kinematics(const float angles_deg[3]) const {
     // limb sits on its radial at (t + rf*cos(a)) with z = -rf*sin(a).
     const float k1 = kSin120; // leg 1 radial: (sin120, +0.5); leg 0: (0,-1); leg 2: (-sin120,+0.5)
 
-    const float a1 = angles_deg[0] * kDegToRad;
-    const float a2 = angles_deg[1] * kDegToRad;
-    const float a3 = angles_deg[2] * kDegToRad;
+    const float a1 = ang_deg[0] * kDegToRad;
+    const float a2 = ang_deg[1] * kDegToRad;
+    const float a3 = ang_deg[2] * kDegToRad;
 
     // Sphere centres for the rod constraints: elbow minus its platform-joint
     // offset (the platform joint of a limb lies on the same radial as its

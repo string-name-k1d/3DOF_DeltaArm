@@ -36,28 +36,30 @@ void DeltaArmControllerNode::declareParams()
 
   // Mechanism geometry (mm) - shared with the visualisers via arm_params.yaml.
   const double base_radius =
-    declare_parameter<double>("geometry.base_radius", 150.0);
+    declare_parameter<double>("geometry.base_radius", 100.0);
   const double platform_radius =
-    declare_parameter<double>("geometry.platform_radius", 60.0);
+    declare_parameter<double>("geometry.platform_radius", 32.5);
   const double upper_arm_len =
-    declare_parameter<double>("geometry.upper_arm_len", 160.0);
+    declare_parameter<double>("geometry.upper_arm_len", 120.0);
   const double lower_arm_len =
-    declare_parameter<double>("geometry.lower_arm_len", 200.0);
+    declare_parameter<double>("geometry.lower_arm_len", 240.0);
 
-  // Visual-only servo-linkage parameters (the controller does not use them;
-  // declared so the shared geometry block loads without "not declared"
-  // warnings). Mechanism per arm: servo shaft -> upper rod (single short motor
-  // crank / horn) -> lower rod (single RIGID bar of constant length
-  // servo_rod_len, solved as a true 4-bar; the crank pin is recomputed each
-  // frame so the rod never stretches) -> upper arm at the attach bracket
-  // (arm_attach_dist = 70 mm with the shoulders on the base-plate corners).
-  // The lower arm (elbow->platform) is drawn as 2 parallel bars separated by
-  // rod_spread.
-  declare_parameter<double>("geometry.servo_radius", 150.0);
-  declare_parameter<double>("geometry.servo_z", -25.0);
-  declare_parameter<double>("geometry.upper_rod_len", 35.0);
-  declare_parameter<double>("geometry.servo_rod_len", 65.5);
-  declare_parameter<double>("geometry.arm_attach_dist", 140.0);
+  // 4-bar servo-linkage geometry (see ArmMechConfig): the servo drives the
+  // upper arm through a horn + rigid rod, mapped by the closed-form solve in
+  // ik_stage2. c = hypot(arm_attach_dist, arm_attach_offset); the ground link
+  // d runs servo -> shoulder.
+  const double servo_radius =
+    declare_parameter<double>("geometry.servo_radius", 57.65);
+  const double servo_z =
+    declare_parameter<double>("geometry.servo_z", -22.5);
+  const double upper_rod_len =
+    declare_parameter<double>("geometry.upper_rod_len", 60.0);
+  const double servo_rod_len =
+    declare_parameter<double>("geometry.servo_rod_len", 35.0);
+  const double arm_attach_dist =
+    declare_parameter<double>("geometry.arm_attach_dist", 68.5);
+  const double arm_attach_offset =
+    declare_parameter<double>("geometry.arm_attach_offset", 20.5);
   declare_parameter<double>("geometry.rod_spread", 8.0);
 
   simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
@@ -72,6 +74,12 @@ void DeltaArmControllerNode::declareParams()
     c.platform_radius = static_cast<float>(platform_radius);
     c.upper_arm_len = static_cast<float>(upper_arm_len);
     c.lower_arm_len = static_cast<float>(lower_arm_len);
+    c.servo_radius = static_cast<float>(servo_radius);
+    c.servo_z = static_cast<float>(servo_z);
+    c.upper_rod_len = static_cast<float>(upper_rod_len);
+    c.servo_rod_len = static_cast<float>(servo_rod_len);
+    c.arm_attach_dist = static_cast<float>(arm_attach_dist);
+    c.arm_attach_offset = static_cast<float>(arm_attach_offset);
     c.plane_angle = static_cast<float>(leg * kTwoPiOver3);
     c.home_offset = 0.0f;
     configs.push_back(c);
@@ -97,6 +105,11 @@ void DeltaArmControllerNode::declareParams()
               "geometry: base_radius=%.1f platform_radius=%.1f "
               "upper_arm_len=%.1f lower_arm_len=%.1f",
               base_radius, platform_radius, upper_arm_len, lower_arm_len);
+  RCLCPP_INFO(get_logger(),
+              "linkage: servo(r=%.1f z=%.1f) horn=%.1f rod=%.1f "
+              "attach=%.1f offset=%.1f",
+              servo_radius, servo_z, upper_rod_len, servo_rod_len,
+              arm_attach_dist, arm_attach_offset);
 }
 
 void DeltaArmControllerNode::setupActionServer()

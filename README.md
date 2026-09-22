@@ -48,6 +48,7 @@ workspace/package).
 ├── .gitignore
 ├── .gitmodules                    # FashionStart UART servo SDK submodule
 ├── .ai/                             # Agent docs: ARCHITECTURE.md, CHANGELOGS.md
+├── docs/                            # KINEMATICS.md (IK + 4-bar derivations)
 ├── action/                          # SetPosition.action  (set_pos)
 ├── msg/                             # ArmPosition.msg, ArmFeedback.msg, MotorTargets.msg
 ├── srv/                             # TogglePositionStream.srv, MotorParamQuery.srv, EmergencyStop.srv
@@ -486,11 +487,18 @@ ros2 launch arm manual.launch                       # controller + WASD (no sim)
 
 ## 7. Inverse Kinematics
 
-The inverse kinematics lives in `src/axis/delta-arm.cpp`:
+The inverse kinematics lives in `src/axis/delta-arm.cpp` (pipe:
 
-* `Arm::ik_stage1(const Vec3 &)` — task-space target → per-limb plane orientation.
-* `Arm::ik_stage2(float theta, int leg)` — limb plane orientation → motor angle.
-* `Arm::apply()` — forward-kinematics estimate of `cur_pos_`.
+* `Arm::ik_stage1(const Vec3 &)` — task-space target → per-limb plane orientation
+  (classic delta closed form, `delta_calc_angle_yz`).
+* `Arm::ik_stage2(float theta, int leg)` — limb plane orientation → motor angle
+  through the **4-bar servo linkage** (`motor_from_arm`).
+* `Arm::apply()` — forward-kinematics estimate of `cur_pos_`, backed by
+  `arm_from_motor` (bisection) + classic delta FK.
+
+See **[`docs/KINEMATICS.md`](docs/KINEMATICS.md)** for the full derivation (stage-1
+closed form, the 4-bar `A/B/C` solve, the `2π − raw` fold and closure band,
+bisection inverse, FK, worked numbers, and the throw/clamp contract).
 
 ## 8. References
 

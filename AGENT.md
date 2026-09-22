@@ -67,16 +67,28 @@ See `README.md → Building`.
   exported kinematics shared library (in the `arm` package, linked by the
   gazebo sim).
 
-## 4. What is intentionally a skeleton
+## 4. IK & the 4-bar servo linkage
 
-The inverse kinematics math is **placeholder**. Fill in:
+The two-stage IK is implemented (not a skeleton):
 - `Arm::ik_stage1(const Vec3 &)` — task-space target → per-limb plane orientation
-- `Arm::ik_stage2(float theta, int leg)` — limb plane orientation → motor angle
-- `Arm::apply()` — optional forward-kinematics estimate of `cur_pos_`
-
-The tests in `test/test_delta_arm.cpp` assert the current skeleton behavior
-(IK returns zeros, e-stop zeroes outputs) — update them when you implement real
-math.
+  (classic delta closed form, `delta_calc_angle_yz`).
+- `Arm::ik_stage2(float theta, int leg)` — limb angle → motor front angle via the
+  **4-bar linkage** closed form: the servo horn (a = `upper_rod_len`) drives a
+  rigid rod (b = `servo_rod_len`) to a bracket on the arm
+  (shoulder→socket link c = hypot(`arm_attach_dist`, `arm_attach_offset`),
+  ground link d = servo→shoulder). Solves `A = 2ad cosθb − 2bd`,
+  `B = 2ad sinθb`, `C = c²−a²−b²−d²+2ab cosθb` with `θb = π − θ_arm`;
+  `motor = 2π − atan2(B,A) − acos(C/|(A,B)|)` (folded into the driver's
+  [0,145]° range). Throws when the linkage cannot close (flat arms), which
+  `set_tar_pos` catches and retains the previous targets.
+- `Arm::arm_from_motor()` recovers the arm angle by monotone bisection of the
+  closing band; `forward_kinematics()` uses it so `apply()`/`get_cur_pos()`
+  return real task-space positions.
+- The geometry defaults (100/32.5/120/240 + the linkage above) must stay in sync
+  between `init_default_geometry()`, the controller `declareParams()`, the
+  SFML sim, `arm_params.yaml`, and `arm_gazebo`'s cmd bridge. The full
+  derivation, conventions and reference numbers live in `docs/KINEMATICS.md`
+  (linked from `README.md §7`).
 
 ## 5. Before asking for help
 

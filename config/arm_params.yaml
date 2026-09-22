@@ -47,16 +47,26 @@ arm_controller:
       # servo_z: height (mm) of the servo output shafts below the pivot plane.
       servo_z: -22.5
       # upper_rod_len: length (mm) of the SERVO HORN (the short motor crank
-      #   fixed to the servo shaft; gear stage 1 side of the linkage).
+      #   fixed to the servo shaft; 4-bar link `a`).
       upper_rod_len: 60.0
       # servo_rod_len: length (mm) of the RIGID connecting rod between the
-      #   crank pin and the arm attach bracket. The crank pin is solved every
-      #   frame so this rod keeps its constant length (true 4-bar) — it never
-      #   stretches or shrinks.
+      #   crank pin and the arm attach bracket (4-bar link `b`). The stage-2 IK
+      #   solves the 4-bar closed form so the motor angle is a NON-linear map
+      #   of the arm angle:
+      #     theta_b = 180 - arm_angle
+      #     A = 2 a d cos(theta_b) - 2 b d
+      #     B = 2 a d sin(theta_b)
+      #     C = c^2 - a^2 - b^2 - d^2 + 2 a b cos(theta_b)
+      #     motor = 2*pi - atan2(B,A) - acos(C/|(A,B)|)   (+ home offset, deg)
+      #   with c = the shoulder->socket link and d = the servo->shoulder ground
+      #   link (both derived below). The linkage closes only for arm angles
+      #   above ~33 deg (flat poses are physically unreachable through it).
       servo_rod_len: 35.0
       # arm_attach_dist: fixed distance (mm) from the arm's base joint to the
-      #   lower-rod attach bracket, measured ALONG the arm.
-      arm_attach_dist: 98.5
+      #   lower-rod attach bracket, measured ALONG the arm. Together with
+      #   arm_attach_offset it defines the shoulder->socket link c =
+      #   hypot(arm_attach_dist, arm_attach_offset).
+      arm_attach_dist: 68.5
       # arm_attach_offset: PERPENDICULAR standoff (mm) of the rod's arm-side
       #   ball socket from the arm axis (the real bracket gap between the rod
       #   endpoint and the arm).
@@ -79,9 +89,11 @@ arm_controller:
     sim:
       # initial_pos: the arm's start posture (metres). Must be IK-reachable
       #   (the controller commands it on startup, so the arm never begins at
-      #   the degenerate (0,0,0)). The visualiser seeds its drawn pose from the
-      #   IK of this point too.
-      initial_pos: [0.0, 0.0, -0.20]
+      #   the degenerate (0,0,0)) AND - with the 4-bar linkage - each limb must
+      #   be able to close, i.e. the pose must sit inside the working envelope
+      #   (arm angles above ~33 deg, all limbs). The visualiser seeds its drawn
+      #   pose from the IK of this point too.
+      initial_pos: [0.0, 0.0, -0.28]
       # simulate_arrival: in sim mode the controller promotes each set_pos goal
       #   to the current pose immediately (no motor driver in the loop).
       simulate_arrival: true

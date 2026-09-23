@@ -564,6 +564,10 @@ int main(int argc, char **argv) {
   sf::Font font;
   bool hasFont = font.loadFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
 
+  // Frame clock: measures real time between rendered frames so the display
+  // smoothing (update_display) is frame-rate independent.
+  sf::Clock frame_clock;
+
   // Layout: left half = top view, right half = side view.
   const float halfW = 600.0f;
   const float cxTop  = halfW * 0.5f;
@@ -608,30 +612,40 @@ int main(int argc, char **argv) {
       drawText(window, sf::Vector2f(halfW + 10, 10), "Side View (XZ)", font, 16,
                sf::Color(160, 160, 160));
       drawText(window, sf::Vector2f(10, 30),
-               node->feedback_live()
+               node->feedback_source_active()
                  ? "SOURCE: real servo feedback (arm/motor_feedback)"
                  : "SOURCE: sim stream (arm/pos)",
                font, 13,
-               node->feedback_live() ? sf::Color(120, 220, 120) : sf::Color(210, 200, 130));
+               node->feedback_source_active() ? sf::Color(120, 220, 120) : sf::Color(210, 200, 130));
     }
 
     // ── Read arm state ──────────────────────────────────────────────────
     // When the real motor driver is publishing fresh, all-online feedback,
     // draw the REAL machine (measured servo angles + FK) instead of the
-    // controller's sim stream (arm/pos).
-    const bool live_fb = node->feedback_live();
-    const float ang[3] = {   // MOTOR angles (degrees, driver convention)
+    // controller's sim stream (arm/pos). The source selection is sticky
+    // (hysteresis + hold, see ArmSimSFMLNode) and the drawn angles are
+    // smoothed, so a serial blip no longer shakes the picture.
+    const bool live_fb = node->select_source();
+    const float raw_ang[3] = {  // raw MOTOR angles from the selected source
       live_fb ? node->fb_ang_[0] : node->ang_[0],
       live_fb ? node->fb_ang_[1] : node->ang_[1],
       live_fb ? node->fb_ang_[2] : node->ang_[2]};
+    node->update_display(raw_ang, frame_clock.restart().asSeconds());
+    const float * ang = node->display_angles();  // smoothed, drawn (per limb)
 
-    // Convert motor -> arm angle per limb through the 4-bar, then draw the
-    // upper arm/linkage with the ARM angle (the mechanism no longer has the
-    // arm simply rotating with the motor).
+    // MOTOR target angles (controller intent) + mapped ARM angles
+    // (phi: armDegFromMotor) for both current and target - shown in the
+    // legend so motor-space and arm-space state are both visible.
+    const float ang_tar[3] = {
+      node->ang_tar_[0], node->ang_tar_[1], node->ang_tar_[2]};
     const float armAng[3] = {
       armDegFromMotor(geom, ang[0]),
       armDegFromMotor(geom, ang[1]),
       armDegFromMotor(geom, ang[2])};
+    const float armTar[3] = {
+      armDegFromMotor(geom, ang_tar[0]),
+      armDegFromMotor(geom, ang_tar[1]),
+      armDegFromMotor(geom, ang_tar[2])};
 
     sf::Vector3f e(static_cast<float>(node->pos_x_) * 1000.0f,  // m → mm
                    static_cast<float>(node->pos_y_) * 1000.0f,
@@ -733,21 +747,38 @@ int main(int argc, char **argv) {
     drawDot(window, toScreenXZ(e, cxSide, cySide), 5.0f, sf::Color::Cyan);
 
     // ── Legend (right half, below the side view) ─────────────────────────
+    // NOTE: the window is 1200x600, so every line must stay below y < 600;
+    // the block is kept compact (14 px pitch) to make room for the angle
+    // readouts.
     if (hasFont) {
-      drawText(window, sf::Vector2f(halfW + 10, 486), "Colour = limb: red=leg 0, green=leg 1, blue=leg 2", font, 12,
+      drawText(window, sf::Vector2f(halfW + 10, 470), "Colour = limb: red=leg 0, green=leg 1, blue=leg 2", font, 12,
                sf::Color(150, 150, 150));
-      drawText(window, sf::Vector2f(halfW + 10, 504), "S = servo   J = arm actuation joint   E = elbow   P = platform joint   EE = end effector", font, 12,
+      drawText(window, sf::Vector2f(halfW + 10, 486), "S = servo   J = arm actuation joint   E = elbow   P = platform joint   EE = end effector", font, 12,
                sf::Color(150, 150, 150));
-      drawText(window, sf::Vector2f(halfW + 10, 522), "grey = servo body + upper rod + lower rod; lower arm (elbow>platform) = 2 parallel bars", font, 12,
+      drawText(window, sf::Vector2f(halfW + 10, 502), "grey = servo body + upper rod + lower rod; lower arm (elbow>platform) = 2 parallel bars", font, 12,
                sf::Color(150, 150, 150));
-      drawText(window, sf::Vector2f(halfW + 10, 540), "thick = upper arm, thin = lower arm (parallel bars)", font, 12,
+      drawText(window, sf::Vector2f(halfW + 10, 518), "thick = upper arm, thin = lower arm (parallel bars)", font, 12,
                sf::Color(150, 150, 150));
-      drawText(window, sf::Vector2f(halfW + 10, 558), "servo angle \u03b8 ~ [0,145]\u00b0 (amber = out of range)", font, 12,
+      drawText(window, sf::Vector2f(halfW + 10, 534), "servo angle \u03b8 ~ [0,145]\u00b0 (amber = out of range)", font, 12,
                sf::Color(150, 150, 150));
+      // Angle readouts: MOTOR angles (theta, servo convention) and ARM angles
+      // (phi, mapped through the 4-bar linkage) - current vs TARGET (the last
+      // set_pos goal mapped into the same space).
+      char thBuf[160];
+      std::snprintf(thBuf, sizeof(thBuf),
+                    "motor \u03b8 cur=(%5.1f, %5.1f, %5.1f)\u00b0  tar=(%5.1f, %5.1f, %5.1f)\u00b0",
+                    ang[0], ang[1], ang[2], ang_tar[0], ang_tar[1], ang_tar[2]);
+      drawText(window, sf::Vector2f(halfW + 10, 554), thBuf, font, 12,
+               sf::Color(210, 210, 210));
+      char phBuf[160];
+      std::snprintf(phBuf, sizeof(phBuf),
+                    "arm   \u03c6 cur=(%5.1f, %5.1f, %5.1f)\u00b0  tar=(%5.1f, %5.1f, %5.1f)\u00b0",
+                    armAng[0], armAng[1], armAng[2], armTar[0], armTar[1], armTar[2]);
+      drawText(window, sf::Vector2f(halfW + 10, 572), phBuf, font, 12,
+               sf::Color(140, 200, 230));
       char buf[160];
-      std::snprintf(buf, sizeof(buf), "pos=(%.1f, %.1f, %.1f) mm  angles=(%.1f, %.1f, %.1f) deg",
-                    e.x, e.y, e.z, ang[0], ang[1], ang[2]);
-      drawText(window, sf::Vector2f(halfW + 10, 580), buf, font, 12,
+      std::snprintf(buf, sizeof(buf), "pos=(%.1f, %.1f, %.1f) mm", e.x, e.y, e.z);
+      drawText(window, sf::Vector2f(halfW + 10, 590), buf, font, 12,
                sf::Color(180, 180, 180));
     }
 

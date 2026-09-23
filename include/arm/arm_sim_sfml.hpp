@@ -63,6 +63,10 @@ public:
   /// Latest motor angles (degrees) from the controller stream.
   float ang_[3] = {0.0f, 0.0f, 0.0f};
 
+  /// Latest motor TARGET angles (degrees) from the controller stream
+  /// (arm/pos.motor_angles_target) - shown alongside the current ones.
+  float ang_tar_[3] = {0.0f, 0.0f, 0.0f};
+
   /// Whether streamed position feedback has arrived at least once.
   bool got_pos_ = false;
 
@@ -77,6 +81,43 @@ public:
   /// stream (arm/pos).
   bool feedback_live() const;
 
+  // ── Anti-shake: source hysteresis + last-good latch + smoothing ─────────
+  //
+  // The drawn motor angles previously flipped every frame between the real
+  // servo readback (arm/motor_feedback) and the controller estimate (arm/pos)
+  // whenever a single serial ping/query failed - the two disagree by the
+  // servo install offsets, so the drawing visibly "shook" without any motion.
+  // The selection is now sticky:
+  //
+  //  * acquiring real feedback requires kFbAcquireStreak consecutive good
+  //    messages;
+  //  * once acquired it is HELD for kFbHoldSeconds after the feedback drops
+  //    out (drawing the last measured angles, not the estimate);
+  //  * only after the hold expires does the view fall back to arm/pos.
+  //
+  // On top of the source selection the drawn angles are exponentially
+  // smoothed (update_display) so servo encoder jitter does not vibrate the
+  // picture; large jumps (> kDispSnapDeg) snap instead of lagging.
+  static constexpr int    kFbAcquireStreak = 3;     // good msgs before switch
+  static constexpr double kFbHoldSeconds   = 1.5;   // keep fb this long after loss
+  static constexpr float  kDispSnapDeg     = 25.0f; // snap instead of glide past
+  static constexpr double kDispTauSeconds  = 0.15;  // smoothing time constant
+
+  /// Per-frame source selection with hysteresis. Returns true when the
+  /// renderer should draw the REAL servo feedback, false for the sim stream.
+  /// Call once per rendered frame BEFORE update_display().
+  bool select_source();
+
+  /// Feed the currently-selected raw motor angles + frame time (seconds).
+  /// Smooths into display_ang_ (used by the renderer) with a dt-based EMA.
+  void update_display(const float raw[3], float dt_seconds);
+
+  /// Smoothed motor angles to draw (degrees).
+  const float * display_angles() const { return display_ang_; }
+
+  /// Which source the current display angles come from (post-hysteresis).
+  bool feedback_source_active() const { return fb_active_; }
+
 private:
   void onPosition(const arm::msg::ArmPosition::SharedPtr msg);
   void onFeedback(const arm::msg::ArmFeedback::SharedPtr msg);
@@ -89,6 +130,14 @@ private:
   bool streaming_ = false;
   rclcpp::Time fb_last_;
   bool got_fb_ = false;
+
+  // Anti-shake state (see comment above).
+  bool fb_active_ = false;      // sticky source selection
+  int  fb_streak_ = 0;          // consecutive good feedback messages
+  bool fb_ever_good_ = false;   // feedback seen valid at least once
+  rclcpp::Time fb_lost_;        // when feedback stopped being good
+  float display_ang_[3] = {0.0f, 0.0f, 0.0f};
+  bool display_init_ = false;
 };
 
 }  // namespace DeltaArmSim

@@ -30,12 +30,16 @@ workspace/package).
 
 ## 1. Prerequisites
 
-- **Build toolchain**: ROS 2 Humble. Either build natively on Ubuntu 22.04 or —
-  on Windows — build inside the packaged Docker container (see [2. Setup](#2-setup)).
+> **Platform labels.** `[Win/WSL2]` = applies only on a **Windows** host
+> (Docker Desktop + WSL2, `usbipd` USB bridging); `[Linux]` = only on a
+> **native Linux** host; unlabelled = both.
+
+- **Build toolchain**: ROS 2 Humble. Either build natively on Ubuntu 22.04 `[Linux]` or —
+  on Windows — build inside the packaged Docker container `[Win/WSL2]` (see [2. Setup](#2-setup)).
 - **FashionStar SDK submodule**: checked out recursively (see [2. Setup](#2-setup)).
 - **Hardware** (only for the motor driver): the FashionStar bus-servo adapter is a
-  USB UART (CH340 → `COMx` on Windows). See [5. Launch](#5-launch) → *Real
-  hardware* and *Docker (Windows WSL2) workflow* for the USB→container bridge.
+  USB UART (CH340 → `COMx` on Windows `[Win/WSL2]`). See [5. Launch](#5-launch) → *Real
+  hardware* and *Docker (Windows WSL2) workflow* `[Win/WSL2]` for the USB→container bridge.
 
 ## 2. Setup
 
@@ -92,7 +96,7 @@ workspace/package).
 git submodule update --init --recursive    # FashionStart SDK
 ```
 
-### Build the container (Docker, Windows WSL2)
+### Build the container (Docker, Windows WSL2) `[Win/WSL2]`
 
 The recommended way to build/run on Windows is Docker Desktop with **WSL2
 integration** enabled — the ROS Humble container runs inside the WSL2
@@ -159,7 +163,7 @@ arm's **joint-angle convention** and bounded before they reach the servo:
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `port_name` | `/dev/ttyUSB0` | UART/serial port of the bus-servo adapter (Windows: `COM8`). |
+| `port_name` | `/dev/ttyUSB0` | UART/serial port of the bus-servo adapter (Windows: `COM8` `[Win/WSL2]`). |
 | `baudrate` | `115200` | Serial baud rate. |
 | `servo_ids` | `[0, 1, 2]` | Binary ids of the three delta-arm servos. |
 | `start_angles` | `[0, 0, 0]` | **Installation offset** (deg) per motor: the physical servo angle when the joint sits at the arm's zero/home pose. A commanded joint angle is sent as `joint + start_angles`, so `start_angles` **is** the per-motor installation offset of the servos. |
@@ -353,7 +357,7 @@ For a real-hardware mirror run `motor:=true` (from `run_arm.sh --view 2d
 --mode motor`; add `--control on`/`control:=true` for WASD to jog the physical
 arm through the same `arm/set_pos` action the manual node uses).
 
-### One-time serial setup (WSL2 USB→container bridge)
+### One-time serial setup (WSL2 USB→container bridge) `[Win/WSL2]`
 
 ```powershell
 # Windows PowerShell (admin):
@@ -464,7 +468,8 @@ DART `pgs` in `worlds/arm_world.sdf`; joint state is bridged over
 Navigation/notes:
 
 ```bash
-docker exec arm_sim bash /root/ros2_ws/src/arm/scripts/install_gazebo_harmonic.sh   # once per container
+docker exec fyp_sim bash /root/install/03-gz-harmonic.sh                    # parent fyp workspace (shared container)
+docker exec fyp_sim bash /root/ros2_ws/src/arm/scripts/install_gazebo_harmonic.sh   # ...or this repo's own script
 ros2 launch arm_gazebo arm_gazebo.launch.py                     # headless
 ros2 launch arm_gazebo arm_gazebo.launch.py gui:=true           # + Gazebo GUI
 ros2 launch arm_gazebo arm_gazebo.launch.py manual:=true        # + WASD terminal

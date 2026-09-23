@@ -5,6 +5,40 @@ Entries are grouped by major phase. The working tree is **staged but uncommitted
 
 ---
 
+## [Unreleased] — Fold the control augmenter into the controller (logic-only)
+
+The control augmenter is no longer a ROS node. It was rewritten as a
+**logic-only** class (`ControlAugmenter`, `include/arm/control_augmenter.hpp` +
+`src/system/control_augmenter.cpp` — no publishers/subscriptions, no rclcpp
+dependency beyond the generated message type) and **combined into the
+controller node**, which runs it on every `MotorTargets` message in
+`publishTargets()` before publishing.
+
+### Changed
+- Removed the `arm_control_augmenter` node and its relay
+  (`arm/motor_targets` → `arm/motor_targets_cmd` → driver). The controller now
+  publishes the already-augmented stream on `arm/motor_targets`, and the
+  driver consumes it directly (its default `targets_topic`).
+- Folded the augmenter parameters (`offset_deg`, `enable_feedforward`,
+  `max_delta_deg`) from the `arm_control_augmenter` block into `arm_controller`
+  in `config/arm_params.yaml`.
+- `arm_system` (`delta_arm_system_main.cpp`) no longer registers a third node:
+  controller + motor driver on one executor, driver on the default topic.
+- `ControlAugmenter` computes the message-interval `dt` from
+  `std::chrono::steady_clock` internally (no rclcpp `now()` in the logic file)
+  and exposes `reset()`, which the controller calls on emergency stop so the
+  zeroed output is not slew-limited.
+
+### Note
+The pipeline remains an identity passthrough by default (offsets `[0,0,0]`,
+feedforward off, slew `0`), so behaviour is unchanged with the stock config.
+Because the augmenter is now inside the controller, the configured
+`offset_deg`/`max_delta_deg` also apply to every controller-driven path
+(full-hardware `arm_system`, the 2-D mirror `arm_sim_2d.launch.py motor:=true`,
+and standalone `arm_controller`), not only the single-process `arm_system`.
+
+---
+
 ## [Unreleased] — Isolate Gazebo simulation into an independent `arm_gazebo` package
 
 The optional Gazebo sim was moved out of the `arm` package into its own ROS 2

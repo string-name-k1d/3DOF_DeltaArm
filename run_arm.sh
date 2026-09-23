@@ -6,13 +6,18 @@
 #                      provided externally (e.g. the arm_gazebo package)
 #   <other args>       executed as a shell command (dev shell / builds)
 #
-# The workspace is mounted by compose at /root/ws (the repo root IS the arm
-# package), so this script sources the colcon install from the current dir.
+# Works in BOTH layouts:
+#   * standalone   : workspace mounted at /root/ws (repo root IS the arm package,
+#                    sees install/setup.bash in the current directory)
+#   * parent fyp   : sources mounted at /root/ros2_ws/src/arm (install at
+#                    /root/ros2_ws/install — the shared fyp_sim container)
 
 set -e
 
 source /opt/ros/humble/setup.bash
-if [ -f install/setup.bash ]; then
+if [ -f /root/ros2_ws/install/setup.bash ]; then
+  source /root/ros2_ws/install/setup.bash
+elif [ -f install/setup.bash ]; then
   source install/setup.bash
 fi
 

@@ -21,6 +21,8 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions & options)
   const auto servo_ids = get_parameter("servo_ids").as_integer_array();
   const bool auto_init = get_parameter("auto_init").as_bool();
   enable_motion_ = get_parameter("enable_motion").as_bool();
+  targets_topic_ = get_parameter("targets_topic").as_string();
+  offline_streak_ = get_parameter("offline_streak").as_int();
   const auto angle_min = get_parameter("angle_min").as_double_array();
   const auto angle_max = get_parameter("angle_max").as_double_array();
   const auto start_angles = get_parameter("start_angles").as_double_array();
@@ -84,12 +86,12 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions & options)
 
   if (enable_motion_) {
     target_sub_ = create_subscription<arm::msg::MotorTargets>(
-      "arm/motor_targets", 10,
+      targets_topic_, 10,
       std::bind(&MotorDriverNode::onMotorTargets, this, std::placeholders::_1));
   } else {
     RCLCPP_INFO(get_logger(),
                 "motion control DISABLED (enable_motion=false) - "
-                "arm/motor_targets subscription not started");
+                "%s subscription not started", targets_topic_.c_str());
   }
 
   query_srv_ = create_service<arm::srv::MotorParamQuery>(
@@ -103,9 +105,10 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions & options)
     static_cast<int64_t>(1000.0 / (feedback_rate_ > 0.0 ? feedback_rate_ : 1.0)));
   feedback_timer_ = create_wall_timer(period, [this]() { publishFeedback(); });
 
-  RCLCPP_INFO(get_logger(), "motor_driver ready (targets: arm/motor_targets, "
+  RCLCPP_INFO(get_logger(), "motor_driver ready (targets: %s, "
                             "feedback: arm/motor_feedback, "
-                            "query: arm/motor_param_query)");
+                            "query: arm/motor_param_query)",
+              targets_topic_.c_str());
 }
 
 void MotorDriverNode::declareParams()
@@ -126,6 +129,16 @@ void MotorDriverNode::declareParams()
   declare_parameter<bool>("enable_motion", true);
   declare_parameter<double>("feedback_rate", 10.0);
   declare_parameter<std::string>("feedback_frame", "base_link");
+
+  // Input target topic. The controller publishes its IK result (already run
+  // through the control augmenter - offsets/feedforward/clamp are applied by
+  // publishTargets(), see control_augmenter.hpp) on "arm/motor_targets"; the
+  // driver consumes that stream directly. The parameter is kept for external
+  // controllers that publish elsewhere.
+  declare_parameter<std::string>("targets_topic", "arm/motor_targets");
+  // Consecutive failed pings/queries before a servo is declared offline
+  // (feedback debounce, see publishFeedback()).
+  declare_parameter<int>("offline_streak", 3);
 }
 
 void MotorDriverNode::onMotorTargets(const arm::msg::MotorTargets::SharedPtr msg)
@@ -185,27 +198,55 @@ void MotorDriverNode::publishFeedback()
 
   std::lock_guard<std::mutex> lock(bus_mutex_);
   for (int i = 0; i < 3; ++i) {
-    bool online = false;
+    // ── ping (debounced) ────────────────────────────────────────────────
+    // A single dropped ping must NOT flip the servo offline: consumers that
+    // switch between measured feedback and a model estimate (the 2-D
+    // visualiser) would then visibly shake. Only `offline_streak_`
+    // CONSECUTIVE failures declare the servo offline.
+    bool ping_ok = false;
     try {
-      online = driver_->ping(i, &online) && online;
+      bool reported_online = false;
+      ping_ok = driver_->ping(i, &reported_online) && reported_online;
     } catch (...) {
-      online = false;
+      ping_ok = false;
     }
-    online_[i] = online ? 1 : 0;
 
-    if (online) {
-      double angle = 0.0;
-      try {
-        angle = driver_->query_angle(i);
-      } catch (...) {
-        angle = -1.0;
+    if (ping_ok) {
+      ping_fail_streak_[i] = 0;
+      if (online_[i] != 1) {
+        RCLCPP_INFO(get_logger(), "servo %d back online", i);
       }
-      msg->servo_angle_current[i] = static_cast<float>(angle == -1.0 ? -1.0 : angle);
-      error_[i] = (angle == -1.0) ? 1 : 0;
-    } else {
-      msg->servo_angle_current[i] = -1.0f;
+      online_[i] = 1;
+      error_[i] = 0;
+    } else if (++ping_fail_streak_[i] >= offline_streak_) {
       if (error_[i] == 0) handleServoFault(i, 1);
+      online_[i] = 0;
     }
+
+    // ── angle read-back (debounced, holds the last good value) ──────────
+    float angle = -1.0f;
+    if (online_[i] == 1) {
+      double queried = -1.0;
+      try {
+        queried = driver_->query_angle(i);
+      } catch (...) {
+        queried = -1.0;
+      }
+
+      if (queried != -1.0) {
+        query_fail_streak_[i] = 0;
+        angle = static_cast<float>(queried);
+        last_good_angle_[i] = angle;  // cache for transient failures
+      } else if (++query_fail_streak_[i] < offline_streak_ &&
+                 last_good_angle_[i] >= 0.0f) {
+        angle = last_good_angle_[i];  // hold last good - no -1 blip
+      } else {
+        angle = -1.0f;
+        if (error_[i] == 0) handleServoFault(i, 1);
+      }
+    }
+
+    msg->servo_angle_current[i] = angle;
     msg->servo_online[i] = online_[i];
     msg->servo_error[i] = error_[i];
   }

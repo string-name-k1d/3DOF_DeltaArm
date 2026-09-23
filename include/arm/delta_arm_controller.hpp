@@ -10,6 +10,7 @@
 #include "rclcpp_action/rclcpp_action.hpp"
 
 #include "arm/action/set_position.hpp"
+#include "arm/control_augmenter.hpp"
 #include "arm/msg/arm_position.hpp"
 #include "arm/msg/motor_targets.hpp"
 #include "arm/srv/emergency_stop.hpp"
@@ -62,6 +63,10 @@ private:
   std::shared_ptr<GoalHandle> current_goal_handle_;
 
   DeltaArm::Arm arm_;
+
+  // Control augmentation (offset / feedforward / slew clamp) is applied to
+  // every published MotorTargets by publishTargets(). See control_augmenter.hpp.
+  ControlAugmenter augmenter_;
 
   double feedback_rate_;
   std::string feedback_frame_;

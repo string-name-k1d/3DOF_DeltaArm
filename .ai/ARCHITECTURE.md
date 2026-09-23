@@ -53,16 +53,22 @@ arm_hardware/src/
 ├── manual/               # WASD manual-control action client
 │   ├── delta_arm_manual.cpp
 │   └── delta_arm_manual_main.cpp
-└── system/               # Combined controller+driver (one process)
+└── system/               # Logic-only helpers consumed by the controller
+    ├── control_augmenter.cpp   # control augmentation pipeline (not a node)
     └── delta_arm_system_main.cpp
 ```
+
+The control augmenter is **logic only** (no ROS node / pub-sub): the `arm`
+controller runs it on every `MotorTargets` message before publishing, so extra
+control terms (per-limb offsets, feedforward, slew clamp) are applied in the
+controller without a separate relay node or extra topic.
 
 #### Build targets
 
 | Target | Type | Sources |
 |---|---|---|
 | `arm_hardware` (lib) | SHARED library | `src/driver/motor_driver.cpp` |
-| `arm_system` | Executable | axis/ + controller/ + driver/node + system/main |
+| `arm_system` | Executable | axis/ + controller/ + driver/node + system/{main,control_augmenter} |
 | `arm_controller` | Executable | axis/ + controller/ (+ controller main) |
 | `arm_motor_driver` | Executable | driver/ (standalone) |
 | `arm_manual` | Executable | manual/ |
@@ -75,9 +81,14 @@ The FashionStar SDK (`motor_driver/fashionstart-uart-servo/`) is built via
 ## Data flow
 
 ```
-  action goal (Twist x/y/z) -> arm_controller -> ik_stage1/ik_stage2 -> motor_targets (deg)
-                                                                           |
-                                                                           v
+  action goal (Twist x/y/z) -> arm_controller -> ik_stage1/ik_stage2
+                                                     |
+                                                     v  control augmenter
+                                                     |  (offset -> ff -> clamp)
+                                                     v
+                                        arm/motor_targets (deg)
+                                                     |
+                                                     v
   arm/pos (feedback) <- get_pos stream        arm_motor_driver -> FSUS servos (UART)
 ```
 
@@ -96,7 +107,8 @@ The FashionStar SDK (`motor_driver/fashionstart-uart-servo/`) is built via
    `ik_stage2` (plane → motor angle) in `src/axis/delta-arm.cpp`. Math is
    deliberately placeholder (returns zeros) so the full pipeline can be
    validated before kinematics are filled in.
-2. **Single-process coupling** — `arm_system` runs controller + driver together.
+2. **Single-process coupling** — `arm_system` runs controller + driver together;
+   the control augmenter is a logic-only class folded into the controller.
 3. **Simulation-friendly interface** — `simulation:=true` launches only
    `arm_controller`; an external sim uses the same topic/service/action names.
 4. **Generic hardware query** — `motor_param_query` serves all query types

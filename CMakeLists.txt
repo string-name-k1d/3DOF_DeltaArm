@@ -115,18 +115,25 @@ function(arm_ros_target TARGET)
 endfunction()
 
 # Single-process: controller + motor driver (real hardware, tight coupling).
+# The control augmenter is a logic-only class (src/system/control_augmenter.cpp)
+# folded into the controller node - it is applied to every published
+# MotorTargets message, so no separate relay node is needed.
 add_executable(arm_system
   src/controller/delta_arm_controller_node.cpp
   src/driver/motor_driver_node.cpp
+  src/system/control_augmenter.cpp
   src/system/delta_arm_system_main.cpp
 )
 arm_ros_target(arm_system)
 target_link_libraries(arm_system arm_lib arm_kinematics)
 
-# Standalone controller (simulation / external driver).
+# Standalone controller (simulation / external driver). The logic-only control
+# augmenter (src/system/control_augmenter.cpp) is compiled in here too, since
+# the controller node applies it to every published MotorTargets message.
 add_executable(arm_controller
   src/controller/delta_arm_controller_node.cpp
   src/controller/delta_arm_controller_main.cpp
+  src/system/control_augmenter.cpp
 )
 arm_ros_target(arm_controller)
 target_link_libraries(arm_controller arm_kinematics)

@@ -47,6 +47,24 @@ private:
   int8_t error_[3];
   bool enable_motion_;
 
+  /// Input target topic. Default "arm/motor_targets": the controller applies
+  /// the control augmenter (offset/feedforward/clamp) to every message in
+  /// publishTargets() before publishing, so the driver consumes the already
+  /// augmented stream directly (see control_augmenter.hpp). The parameter
+  /// exists for external controllers that publish elsewhere.
+  std::string targets_topic_;
+
+  // ── Feedback debounce ────────────────────────────────────────────────────
+  // A servo is only declared offline after `offline_streak_` CONSECUTIVE
+  // failed pings, and a failed angle query holds the last good value instead
+  // of publishing -1/offline. Without this, a single serial-bus blip flips
+  // the servo state, and any consumer that switches between the measured
+  // angles and a model estimate (the 2-D visualiser) visibly shakes.
+  int ping_fail_streak_[3] = {0, 0, 0};
+  int query_fail_streak_[3] = {0, 0, 0};
+  float last_good_angle_[3] = {-1.0f, -1.0f, -1.0f};
+  int offline_streak_ = 3;
+
   /// Guards all access to driver_ : the node runs on a MultiThreadedExecutor,
   /// so the feedback timer and the motor-targets subscription / query service
   /// may be called concurrently and must not touch the shared serial port at

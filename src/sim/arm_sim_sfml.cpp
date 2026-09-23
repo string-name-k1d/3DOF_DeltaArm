@@ -1,5 +1,6 @@
 #include "arm/arm_sim_sfml.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace DeltaArmSim
@@ -63,6 +64,7 @@ void ArmSimSFMLNode::onPosition(const arm::msg::ArmPosition::SharedPtr msg)
   pos_z_ = msg->position.z;
   for (int i = 0; i < 3; ++i) {
     ang_[i] = msg->motor_angles_current[i];
+    ang_tar_[i] = msg->motor_angles_target[i];
   }
   got_pos_ = true;
 }
@@ -86,6 +88,51 @@ bool ArmSimSFMLNode::feedback_live() const
     if (fb_online_[i] != 1 || fb_ang_[i] < 0.0f) return false;
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Anti-shake: sticky source selection + smoothed display angles
+// ---------------------------------------------------------------------------
+bool ArmSimSFMLNode::select_source()
+{
+  const bool good = feedback_live();
+
+  if (good) {
+    fb_streak_ = std::min(fb_streak_ + 1, kFbAcquireStreak);
+    fb_lost_ = now();
+    fb_ever_good_ = true;
+    if (!fb_active_ && fb_streak_ >= kFbAcquireStreak) {
+      fb_active_ = true;  // acquire: require a consistent run, not one msg
+    }
+  } else {
+    fb_streak_ = 0;
+    if (fb_active_ && fb_ever_good_ &&
+        (now() - fb_lost_).seconds() > kFbHoldSeconds) {
+      fb_active_ = false;  // only drop after the hold period (no flicker)
+    }
+  }
+  return fb_active_;
+}
+
+void ArmSimSFMLNode::update_display(const float raw[3], float dt_seconds)
+{
+  if (!display_init_) {
+    for (int i = 0; i < 3; ++i) display_ang_[i] = raw[i];
+    display_init_ = true;
+    return;
+  }
+
+  // dt-based exponential smoothing (frame-rate independent). Jitter of ~1 deg
+  // at 10-20 Hz message rates is attenuated ~10x; real motion still tracks.
+  const double alpha = 1.0 - std::exp(-static_cast<double>(dt_seconds) / kDispTauSeconds);
+  for (int i = 0; i < 3; ++i) {
+    if (std::fabs(raw[i] - display_ang_[i]) > kDispSnapDeg) {
+      display_ang_[i] = raw[i];  // big jump (mode switch / retarget): snap
+    } else {
+      display_ang_[i] = static_cast<float>(
+        display_ang_[i] + alpha * (raw[i] - display_ang_[i]));
+    }
+  }
 }
 
 }  // namespace DeltaArmSim

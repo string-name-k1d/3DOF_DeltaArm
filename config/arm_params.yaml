@@ -18,6 +18,19 @@ arm_controller:
     #   (feedback-only run).
     enable_motion: true
 
+    # --- Control augmenter (logic-only class, folded into this node) ---------
+    # Applied to every MotorTargets message in publishTargets() before it is
+    # published on arm/motor_targets (see include/arm/control_augmenter.hpp).
+    # Defaults are an IDENTITY passthrough: the robot's behaviour is unchanged.
+    # offset_deg: per-limb constant offset (deg) added to the commanded motor
+    #   angle — installation/calibration correction without touching the model.
+    offset_deg: [0.0, 0.0, 0.0]
+    # enable_feedforward: master switch for the feedforward hook. The hook is a
+    #   documented no-op (TODO) until implemented in control_augmenter.cpp.
+    enable_feedforward: false
+    # max_delta_deg: slew clamp — maximum change per message (deg). 0 disables.
+    max_delta_deg: 0.0
+
 # ============================================================================
 # Shared delta-arm mechanism geometry (read by BOTH the controller kinematics
 # and the 2-D SFML visualiser rendering). The "/**" glob makes the block below
@@ -126,6 +139,16 @@ arm_motor_driver:
     #   subscription is NOT started, so the servos can never be commanded to
     #   move (feedback-only run; ping/telemetry still work).
     enable_motion: true
+    # targets_topic: topic carrying the motor-angle commands this driver
+    #   consumes. The controller applies the control augmenter to its IK output
+    #   in publishTargets() before publishing, so the driver subscribes to
+    #   arm/motor_targets directly — keep this at the default.
+    targets_topic: "arm/motor_targets"
+    # offline_streak: consecutive failed pings/angle-queries before a servo is
+    #   declared offline. Debounces serial-bus hiccups so feedback consumers
+    #   (the 2-D visualiser) do not shake between measured values and the model
+    #   estimate on a single dropped packet.
+    offline_streak: 3
 
 arm_manual_control:
   ros__parameters:

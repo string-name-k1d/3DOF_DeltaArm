@@ -1,5 +1,6 @@
 #include "arm/delta_arm_controller.hpp"
 
+#include <array>
 #include <chrono>
 #include <functional>
 #include <vector>
@@ -65,6 +66,25 @@ void DeltaArmControllerNode::declareParams()
   simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
   enable_motion_ = declare_parameter<bool>("enable_motion", true);
   const auto initial = declare_parameter<std::vector<double>>("sim.initial_pos", std::vector<double>{0.0, 0.0, -0.30});
+
+  // Control-augmentation pipeline (see arm/control_augmenter.hpp): per-limb
+  // offset -> feedforward -> slew clamp, applied to every MotorTargets message
+  // published on arm/motor_targets. Identity by default (offsets zero, FF off,
+  // no slew clamp), so enabling the node never changes the robot on its own.
+  const auto offset_deg = declare_parameter<std::vector<double>>(
+    "offset_deg", std::vector<double>{0.0, 0.0, 0.0});
+  std::array<double, 3> offset{0.0, 0.0, 0.0};
+  for (size_t i = 0; i < 3 && i < offset_deg.size(); ++i) {
+    offset[i] = offset_deg[i];
+  }
+  const bool enable_feedforward = declare_parameter<bool>("enable_feedforward", false);
+  const double max_delta_deg = declare_parameter<double>("max_delta_deg", 0.0);
+  augmenter_.configure(offset, enable_feedforward, max_delta_deg);
+  RCLCPP_INFO(get_logger(),
+              "control augmenter: offsets=[%.2f, %.2f, %.2f] deg, feedforward=%s, slew=%s",
+              offset[0], offset[1], offset[2],
+              enable_feedforward ? "on" : "off",
+              max_delta_deg > 0.0 ? "on" : "off");
 
   std::vector<DeltaArm::ArmMechConfig> configs;
   constexpr double kTwoPiOver3 = 2.0943951023931953;  // 120 deg
@@ -169,7 +189,10 @@ void DeltaArmControllerNode::setupEmergencyStop()
         }
 
         // 2) Zero the arm state and republish the (zeroed) motor output.
+        //    Reset the augmenter first so the estop zero is delivered
+        //    immediately and is not clamped by the slew limiter.
         arm_.stop();
+        augmenter_.reset();
         const float zero[3] = {0.0f, 0.0f, 0.0f};
         publishTargets(zero);
 
@@ -264,7 +287,7 @@ void DeltaArmControllerNode::publishTargets(const float * angles)
   msg->angles[0] = angles[0];
   msg->angles[1] = angles[1];
   msg->angles[2] = angles[2];
-  motor_pub_->publish(*msg);
+  motor_pub_->publish(augmenter_.augment(*msg));
 }
 
 void DeltaArmControllerNode::publishPosition()

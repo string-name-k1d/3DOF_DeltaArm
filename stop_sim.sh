@@ -21,10 +21,12 @@ pkill -9 -x arm_sim_sfml
 pkill -9 -x arm_manual
 pkill -9 -x arm_system
 pkill -9 -x arm_motor_driver
+pkill -9 -x arm_endpoint
 pkill -9 -f "install/arm/lib/arm/arm_motor_driver"
 pkill -9 -f "install/arm/lib/arm/arm_sim_sfml"
 pkill -9 -f "install/arm/lib/arm/arm_controller"
 pkill -9 -f "install/arm/lib/arm/arm_manual"
+pkill -9 -f "install/arm/lib/arm/arm_endpoint"
 pkill -9 -x gzserver
 pkill -9 -x gzclient
 # Gazebo Harmonic (gz-sim 8) server + the arm_gazebo launch stack.

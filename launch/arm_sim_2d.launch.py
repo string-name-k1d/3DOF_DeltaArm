@@ -17,6 +17,8 @@
 #   motor    (false)  include the real arm_motor_driver node.
 #   control  (true)   enable set_pos motor control (only meaningful with motor).
 #                      false = visualization-only using motor feedbacks.
+#   endpoint (true)   include the arm_endpoint node (endpoint state + CoG /
+#                      torque estimate topics). Observational only.
 
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -34,6 +36,7 @@ def generate_launch_description():
 
     motor = LaunchConfiguration('motor')
     control = LaunchConfiguration('control')
+    endpoint = LaunchConfiguration('endpoint')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -43,6 +46,10 @@ def generate_launch_description():
             'control', default_value='true',
             description='Enable set_pos motor control (motor mode only); '
                         'false = visualization-only using motor feedbacks.'),
+        DeclareLaunchArgument(
+            'endpoint', default_value='true',
+            description='Include the arm_endpoint node (endpoint state + CoG / '
+                        'torque estimate topics).'),
 
         # Virtual-sim controller (no motor driver): the two-in-one behaviour
         # that arm_sim_2d.launch.py had before the motor/control args.
@@ -62,6 +69,17 @@ def generate_launch_description():
             name='arm_sim_sfml',
             output='screen',
             parameters=[params_file],
+        ),
+
+        # Terminal end-effector node: endpoint state + CoG / torque estimates.
+        # Purely observational, so it runs in every mode.
+        Node(
+            package='arm',
+            executable='arm_endpoint',
+            name='arm_endpoint',
+            output='screen',
+            parameters=[params_file],
+            condition=IfCondition(endpoint),
         ),
 
         # Motor mode, control ON: driver + controller so set_pos jogs the real

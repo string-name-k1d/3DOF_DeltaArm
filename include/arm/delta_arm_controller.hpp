@@ -10,8 +10,10 @@
 #include "rclcpp_action/rclcpp_action.hpp"
 
 #include "arm/action/set_position.hpp"
+#include "arm/arm_state_control.hpp"
 #include "arm/control_augmenter.hpp"
 #include "arm/msg/arm_position.hpp"
+#include "arm/msg/control_state.hpp"
 #include "arm/msg/motor_targets.hpp"
 #include "arm/srv/emergency_stop.hpp"
 #include "arm/srv/toggle_position_stream.hpp"
@@ -44,6 +46,7 @@ private:
   void setupEmergencyStop();
   void publishPosition();
   void publishTargets(const float * angles);
+  void publishControlState();
 
   // rclcpp_action callbacks
   rclcpp_action::GoalResponse handleGoal(
@@ -56,6 +59,7 @@ private:
   rclcpp::Publisher<arm::msg::MotorTargets>::SharedPtr motor_pub_;
   rclcpp::Publisher<arm::msg::ArmPosition>::SharedPtr pos_pub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joints_pub_;
+  rclcpp::Publisher<arm::msg::ControlState>::SharedPtr control_state_pub_;
   rclcpp::Service<arm::srv::TogglePositionStream>::SharedPtr toggle_srv_;
   rclcpp::Service<arm::srv::EmergencyStop>::SharedPtr estop_srv_;
   rclcpp::TimerBase::SharedPtr feedback_timer_;
@@ -68,10 +72,13 @@ private:
   // every published MotorTargets by publishTargets(). See control_augmenter.hpp.
   ControlAugmenter augmenter_;
 
+  // High-level control state (zero/emergency, home, position control). Decides
+  // whether set_pos goals are accepted; see arm_state_control.hpp.
+  ArmStateControl state_control_;
+
   double feedback_rate_;
   std::string feedback_frame_;
   bool streaming_;
-  bool estop_active_;
   bool simulate_arrival_;
   bool enable_motion_;
 };

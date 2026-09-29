@@ -31,6 +31,50 @@ arm_controller:
     # max_delta_deg: slew clamp — maximum change per message (deg). 0 disables.
     max_delta_deg: 0.0
 
+    # --- Control state machine (logic-only class, folded into this node) -----
+    # Governs which of zero/emergency, home and position-control the arm is in
+    # (see include/arm/arm_state_control.hpp); the current state is published on
+    # topic "arm/control_state". The zero/emergency state rejects set_pos goals,
+    # so it must never be used as the boot state.
+    control:
+      # home_pos: the safe home posture (metres) the arm returns to after an
+      #   emergency-stop release. Must be IK-reachable, like sim.initial_pos.
+      home_pos: [0.0, 0.0, -0.30]
+
+# ============================================================================
+# Terminal end-effector node (skeleton). Owns the swappable EndpointModule and
+# publishes the endpoint state plus the CoG / torque estimates.
+# ============================================================================
+arm_endpoint:
+  ros__parameters:
+    # module_type: which end-effector module to instantiate. Only "null" (a
+    #   placeholder with the full interface) exists today; unknown values fall
+    #   back to it. New real modules (gripper, camera rig, ...) are added by
+    #   implementing EndpointModule — see src/system/endpoint_module.cpp.
+    module_type: "null"
+    # frame_id: frame attached to the published endpoint/CoG/torque messages.
+    frame_id: "base_link"
+    # publish_rate: rate of arm/endpoint/state, arm/endpoint/cog_estimate and
+    #   arm/endpoint/torque_estimate (Hz).
+    publish_rate: 5.0
+    # connector_connected: initial state of the dummy connector flag. Real
+    #   hardware will drive this from a limit switch on the tool mount.
+    connector_connected: false
+    # payload_mass_kg: synthetic tool/payload mass used by the CoG and torque
+    #   estimators when the connector is set.
+    payload_mass_kg: 0.25
+    # payload_cog_x/y/z: synthetic payload centre of gravity in the endpoint
+    #   frame (metres).
+    payload_cog_x: 0.0
+    payload_cog_y: 0.0
+    payload_cog_z: 0.04
+    # arm_mass_kg / arm_cog_*: the arm's own mass and centre of gravity, which
+    #   the combined CoG estimate is blended with.
+    arm_mass_kg: 1.20
+    arm_cog_x: 0.0
+    arm_cog_y: 0.0
+    arm_cog_z: -0.12
+
 # ============================================================================
 # Shared delta-arm mechanism geometry (read by BOTH the controller kinematics
 # and the 2-D SFML visualiser rendering). The "/**" glob makes the block below

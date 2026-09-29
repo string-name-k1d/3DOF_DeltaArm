@@ -15,11 +15,17 @@
 -->
 <launch>
   <arg name="simulation" default="true"/>
+  <!-- endpoint: start the standalone terminal end-effector node in SIMULATION.
+       Hardware runs arm_system, which already embeds the endpoint node, so the
+       standalone node is only started alongside the sim-only arm_controller. -->
+  <arg name="endpoint" default="true"/>
   <arg name="params_file"
        default="$(find-pkg-share arm)/config/arm_params.yaml"/>
 
-  <!-- Controller: real hardware = system (controller+driver); sim = controller only. -->
-  <node pkg="arm" exec="arm_system" name="arm_system"
+  <!-- Controller: real hardware = system (controller+driver+endpoint);
+       sim = controller only. No name= on arm_system: it hosts three nodes and
+       launch name= would inject a process-wide __node:= remap over all of them. -->
+  <node pkg="arm" exec="arm_system"
         output="screen" unless="$(var simulation)">
     <param from="$(var params_file)"/>
   </node>
@@ -27,6 +33,14 @@
         output="screen" if="$(var simulation)">
     <param from="$(var params_file)"/>
   </node>
+
+  <!-- Simulation-only standalone endpoint (hardware gets it from arm_system). -->
+  <group if="$(var simulation)">
+    <node pkg="arm" exec="arm_endpoint" name="arm_endpoint" output="screen"
+          if="$(var endpoint)">
+      <param from="$(var params_file)"/>
+    </node>
+  </group>
 
   <!-- Manual-control node: sends set_pos goals from WASD, prints pos changes. -->
   <node pkg="arm" exec="arm_manual" name="arm_manual_control"

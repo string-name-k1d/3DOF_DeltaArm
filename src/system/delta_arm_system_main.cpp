@@ -3,6 +3,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp/executors/multi_threaded_executor.hpp"
 
+#include "arm/arm_endpoint_node.hpp"
 #include "arm/delta_arm_controller.hpp"
 #include "arm/motor_driver_node.hpp"
 
@@ -28,6 +29,11 @@
  * The pipeline is an identity passthrough by default; configure it under
  * `arm_controller` in config/arm_params.yaml (offset_deg / enable_feedforward
  * / max_delta_deg).
+ *
+ * The same file also registers the terminal end-effector node, which owns the
+ * swappable EndpointModule and publishes the endpoint state plus the CoG and
+ * torque estimates (see endpoint_module.hpp). It is observational only — it
+ * never commands the motors.
  */
 int main(int argc, char ** argv)
 {
@@ -37,13 +43,15 @@ int main(int argc, char ** argv)
 
   auto controller = std::make_shared<DeltaArmRos::DeltaArmControllerNode>(options);
   auto driver = std::make_shared<DeltaArmDriverNode::MotorDriverNode>(options);
+  auto endpoint = std::make_shared<DeltaArmRos::ArmEndpointNode>(options);
 
   auto executor = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   executor->add_node(controller);
   executor->add_node(driver);
+  executor->add_node(endpoint);
 
   RCLCPP_INFO(rclcpp::get_logger("arm_system"),
-              "arm_system up: controller (+ control augmenter) + motor_driver in one process");
+              "arm_system up: controller (+ control augmenter) + motor_driver + endpoint in one process");
   executor->spin();
 
   rclcpp::shutdown();

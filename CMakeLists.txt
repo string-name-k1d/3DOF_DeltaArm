@@ -23,6 +23,7 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(action_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 # Optional: SFML (2D visual simulator). Optional so the hardware/controller/
@@ -37,6 +38,10 @@ set(arm_msg_files
   "msg/ArmPosition.msg"
   "msg/ArmFeedback.msg"
   "msg/MotorTargets.msg"
+  "msg/ControlState.msg"
+  "msg/EndpointState.msg"
+  "msg/CogEstimate.msg"
+  "msg/TorqueEstimate.msg"
 )
 set(arm_srv_files
   "srv/TogglePositionStream.srv"
@@ -53,7 +58,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   ${arm_action_files}
   DEPENDENCIES std_msgs geometry_msgs action_msgs
 )
-
 # ---------------------------------------------------------------------------
 # FashionStart C++ serial-bus servo driver (git submodule). Builds the
 # "fsuartservo" and "cserialport" shared libraries from the checked-out
@@ -101,7 +105,7 @@ target_link_libraries(arm_lib fsuartservo)
 # the standard ROS deps. On Humble we use rosidl_get_typesupport_target.
 function(arm_link_ros TARGET)
   ament_target_dependencies(${TARGET}
-    rclcpp rclcpp_action std_msgs geometry_msgs action_msgs sensor_msgs
+    rclcpp rclcpp_action std_msgs geometry_msgs action_msgs sensor_msgs std_srvs
   )
   rosidl_get_typesupport_target(cpp_typesupport_target
     ${PROJECT_NAME} "rosidl_typesupport_cpp")
@@ -123,22 +127,36 @@ endfunction()
 add_executable(arm_system
   src/controller/delta_arm_controller_node.cpp
   src/driver/motor_driver_node.cpp
+  src/endpoint/arm_endpoint_node.cpp
+  src/system/arm_state_control.cpp
   src/system/control_augmenter.cpp
+  src/system/endpoint_module.cpp
   src/system/delta_arm_system_main.cpp
 )
 arm_ros_target(arm_system)
 target_link_libraries(arm_system arm_lib arm_kinematics)
 
 # Standalone controller (simulation / external driver). The logic-only control
-# augmenter (src/system/control_augmenter.cpp) is compiled in here too, since
-# the controller node applies it to every published MotorTargets message.
+# augmenter (src/system/control_augmenter.cpp) and the control-state machine
+# (src/system/arm_state_control.cpp) are compiled in here too, since the
+# controller node owns both.
 add_executable(arm_controller
   src/controller/delta_arm_controller_node.cpp
   src/controller/delta_arm_controller_main.cpp
+  src/system/arm_state_control.cpp
   src/system/control_augmenter.cpp
 )
 arm_ros_target(arm_controller)
 target_link_libraries(arm_controller arm_kinematics)
+
+# Terminal end-effector node: owns the swappable EndpointModule and publishes
+# the endpoint state + CoG / torque estimates (skeleton; null module).
+add_executable(arm_endpoint
+  src/endpoint/arm_endpoint_node.cpp
+  src/endpoint/arm_endpoint_main.cpp
+  src/system/endpoint_module.cpp
+)
+arm_ros_target(arm_endpoint)
 
 # Standalone motor driver.
 add_executable(arm_motor_driver
@@ -188,6 +206,7 @@ install(TARGETS
   arm_controller
   arm_motor_driver
   arm_manual
+  arm_endpoint
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

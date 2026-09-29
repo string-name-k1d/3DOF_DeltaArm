@@ -22,12 +22,23 @@
 <launch>
   <arg name="simulation" default="false"/>
   <arg name="motion" default="true"/>
+  <!-- endpoint: start the STANDALONE terminal end-effector node (endpoint state
+       + CoG / torque estimate topics). Purely observational; it never commands
+       motion. NOTE: the full-hardware arm_system process already embeds the
+       endpoint node, so in that mode this arg is ignored (a second arm_endpoint
+       would clash on the node name) — the endpoint is always present there. -->
+  <arg name="endpoint" default="true"/>
   <arg name="params_file"
        default="$(find-pkg-share arm)/config/arm_params.yaml"/>
 
-  <!-- Full hardware (motion enabled): controller + driver in one process. -->
+  <!-- Full hardware (motion enabled): controller + driver + endpoint in ONE
+       process (arm_system), so no standalone endpoint is started here. -->
   <group if="$(var motion)">
-    <node pkg="arm" exec="arm_system" name="arm_system" output="screen"
+    <!-- No name= here: arm_system hosts THREE nodes (arm_controller,
+         arm_motor_driver, arm_endpoint) in one process, and launch name=
+         would inject a process-wide `__node:=` remap that renames all of
+         them. Let each node keep the name it sets in C++. -->
+    <node pkg="arm" exec="arm_system" output="screen"
           unless="$(var simulation)">
       <param from="$(var params_file)"/>
     </node>
@@ -45,6 +56,10 @@
         <param from="$(var params_file)"/>
         <param name="enable_motion" value="false"/>
       </node>
+      <node pkg="arm" exec="arm_endpoint" name="arm_endpoint" output="screen"
+            if="$(var endpoint)">
+        <param from="$(var params_file)"/>
+      </node>
     </group>
   </group>
 
@@ -53,4 +68,12 @@
         if="$(var simulation)">
     <param from="$(var params_file)"/>
   </node>
+
+  <!-- ...and, in simulation, the standalone endpoint node. -->
+  <group if="$(var simulation)">
+    <node pkg="arm" exec="arm_endpoint" name="arm_endpoint" output="screen"
+          if="$(var endpoint)">
+      <param from="$(var params_file)"/>
+    </node>
+  </group>
 </launch>

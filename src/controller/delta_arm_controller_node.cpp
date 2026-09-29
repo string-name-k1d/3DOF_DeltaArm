@@ -9,13 +9,14 @@ namespace DeltaArmRos {
 
 DeltaArmControllerNode::DeltaArmControllerNode(const rclcpp::NodeOptions& options)
     : Node("arm_controller", options), feedback_rate_(20.0), feedback_frame_("base_link"), streaming_(false),
-      estop_active_(false), simulate_arrival_(true), enable_motion_(true) {
+      simulate_arrival_(true), enable_motion_(true) {
     declareParams();
     setupActionServer();
     setupGetPosition();
     setupEmergencyStop();
 
-    RCLCPP_INFO(get_logger(), "arm_controller ready (set_pos action / get_pos streaming)");
+    RCLCPP_INFO(get_logger(), "arm_controller ready (set_pos action / get_pos streaming), state=%s",
+                ArmStateControl::toString(state_control_.getState()));
 }
 
 DeltaArmControllerNode::~DeltaArmControllerNode() { feedback_timer_->cancel(); }
@@ -61,6 +62,18 @@ void DeltaArmControllerNode::declareParams() {
     augmenter_.configure(offset, enable_feedforward, max_delta_deg);
     RCLCPP_INFO(get_logger(), "control augmenter: offsets=[%.2f, %.2f, %.2f] deg, feedforward=%s, slew=%s", offset[0],
                 offset[1], offset[2], enable_feedforward ? "on" : "off", max_delta_deg > 0.0 ? "on" : "off");
+
+    // Control-state machine (see arm/arm_state_control.hpp): the safe home
+    // posture used when the arm returns home / after an estop release. The node
+    // boots in kHome, so goals are accepted until an estop latches kZeroEmergency.
+    const auto home_pos = declare_parameter<std::vector<double>>("control.home_pos", std::vector<double>{0.0, 0.0, -0.30});
+    std::array<double, 3> home{0.0, 0.0, -0.30};
+    for (size_t i = 0; i < 3 && i < home_pos.size(); ++i) {
+        home[i] = home_pos[i];
+    }
+    state_control_.configureHome(home);
+    RCLCPP_INFO(get_logger(), "arm control state: %s, home=(%.3f, %.3f, %.3f) m",
+                ArmStateControl::toString(state_control_.getState()), home[0], home[1], home[2]);
 
     std::vector<DeltaArm::ArmMechConfig> configs;
     constexpr double kTwoPiOver3 = 2.0943951023931953; // 120 deg
@@ -112,6 +125,8 @@ void DeltaArmControllerNode::declareParams() {
 
 void DeltaArmControllerNode::setupActionServer() {
     motor_pub_ = create_publisher<arm::msg::MotorTargets>("arm/motor_targets", 10);
+    control_state_pub_ = create_publisher<arm::msg::ControlState>("arm/control_state", 10);
+    publishControlState();
 
     if (!enable_motion_) {
         RCLCPP_INFO(get_logger(), "motion control DISABLED (enable_motion=false) - set_pos action not started");
@@ -158,26 +173,31 @@ void DeltaArmControllerNode::setupEmergencyStop() {
                     current_goal_handle_.reset();
                 }
 
-                // 2) Zero the arm state and republish the (zeroed) motor output.
-                //    Reset the augmenter first so the estop zero is delivered
-                //    immediately and is not clamped by the slew limiter.
-                arm_.stop();
+                // 2) Latch the zero/emergency state, zero the arm, and
+                //    republish the (zeroed) motor output. Reset the augmenter
+                //    first so the estop zero is delivered immediately and is
+                //    not clamped by the slew limiter.
+                state_control_.activateEmergencyStop("emergency stop service");
                 augmenter_.reset();
+                arm_.stop();
                 const float zero[3] = {0.0f, 0.0f, 0.0f};
                 publishTargets(zero);
+                publishControlState();
 
                 // 3) Latch: reject new goals until released; also pause streaming.
-                estop_active_ = true;
                 streaming_ = false;
 
                 resp->success = true;
                 resp->emergency_active = true;
-                RCLCPP_WARN(get_logger(), "EMERGENCY STOP - motors zeroed, actions halted");
+                RCLCPP_WARN(get_logger(), "EMERGENCY STOP - motors zeroed, actions halted, state=%s",
+                            ArmStateControl::toString(state_control_.getState()));
             } else {
-                estop_active_ = false;
+                state_control_.releaseEmergencyStop("emergency stop service");
+                publishControlState();
                 resp->success = true;
                 resp->emergency_active = false;
-                RCLCPP_INFO(get_logger(), "emergency stop released");
+                RCLCPP_INFO(get_logger(), "emergency stop released, state=%s",
+                            ArmStateControl::toString(state_control_.getState()));
             }
         });
 }
@@ -187,11 +207,15 @@ void DeltaArmControllerNode::setupEmergencyStop() {
 // ---------------------------------------------------------------------------
 rclcpp_action::GoalResponse DeltaArmControllerNode::handleGoal(const rclcpp_action::GoalUUID& /*uuid*/,
                                                                std::shared_ptr<const SetPosition::Goal> /*goal*/) {
-    if (estop_active_) {
-        RCLCPP_WARN(get_logger(), "set_pos goal REJECTED - emergency stop active");
+    if (!state_control_.acceptsGoals()) {
+        RCLCPP_WARN(get_logger(), "set_pos goal REJECTED - state is %s (%s)",
+                    ArmStateControl::toString(state_control_.getState()), state_control_.getLastReason().c_str());
         return rclcpp_action::GoalResponse::REJECT;
     }
-    RCLCPP_INFO(get_logger(), "set_pos goal received - accepting");
+    state_control_.onGoalAccepted();
+    publishControlState();
+    RCLCPP_INFO(get_logger(), "set_pos goal received - accepting (state=%s)",
+                ArmStateControl::toString(state_control_.getState()));
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
 
@@ -254,6 +278,32 @@ void DeltaArmControllerNode::publishTargets(const float* angles) {
     msg->angles[1] = angles[1];
     msg->angles[2] = angles[2];
     motor_pub_->publish(augmenter_.augment(*msg));
+}
+
+void DeltaArmControllerNode::publishControlState() {
+    if (!control_state_pub_) {
+        return;
+    }
+
+    auto msg = std::make_shared<arm::msg::ControlState>();
+    msg->header.stamp = now();
+    msg->header.frame_id = feedback_frame_;
+    msg->state = ArmStateControl::toString(state_control_.getState());
+    msg->emergency_active = state_control_.isEmergencyActive();
+    msg->accepts_goals = state_control_.acceptsGoals();
+    msg->last_reason = state_control_.getLastReason();
+
+    const auto& home = state_control_.getHomePose();
+    msg->home_position[0] = static_cast<float>(home[0]);
+    msg->home_position[1] = static_cast<float>(home[1]);
+    msg->home_position[2] = static_cast<float>(home[2]);
+
+    const DeltaArm::Vec3 cur = arm_.get_cur_pos();
+    msg->current_position[0] = cur.x;
+    msg->current_position[1] = cur.y;
+    msg->current_position[2] = cur.z;
+
+    control_state_pub_->publish(*msg);
 }
 
 void DeltaArmControllerNode::publishPosition() {

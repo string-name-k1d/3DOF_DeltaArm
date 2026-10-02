@@ -565,7 +565,7 @@ ros2 launch arm manual.launch                       # controller + WASD (no sim)
 The inverse kinematics lives in `src/axis/delta-arm.cpp` (pipe:
 
 * `Arm::ik_stage1(const Vec3 &)` — task-space target → per-limb plane orientation
-  (classic delta closed form, `delta_calc_angle_yz`).
+  (the classic delta IK of R. L. Williams II, `delta_inverse_kinematics_arm`).
 * `Arm::ik_stage2(float theta, int leg)` — limb plane orientation → motor angle
   through the **4-bar servo linkage** (`motor_from_arm`).
 * `Arm::apply()` — forward-kinematics estimate of `cur_pos_`, backed by
@@ -650,46 +650,50 @@ python3 arm/test/gz_joint_check.py 101.13 gen0    0.0 0.0 -0.32  0.0 0.0 -0.14
 `e2e_sweep.py` also checks that a refused goal neither moves the arm nor advances
 the target marker, and that no motor is ever commanded past its stop.
 
-See **[`docs/KINEMATICS.md`](docs/KINEMATICS.md)** for the full derivation (stage-1
-closed form, the 4-bar `A/B/C` solve, the `2π − raw` fold and closure band,
-bisection inverse, FK, worked numbers, and the band resolution).
+See **[`docs/KINEMATICS.md`](docs/KINEMATICS.md)** for the full derivation (the
+Williams stage-1 `A/B/C/D` solve and its half-angle quadratic, the exact 4-bar
+circle-circle intersection and closure test, the band resolution, the bisection
+inverse, FK, and worked numbers for both shipped assemblies).
 
-### Known geometry gap: the gen0 linkage does not span the real servo travel
+### Known geometry gap: the gen0 servo linkage is still uncalibrated
 
-**The `gen0` horn/rod lengths are not yet confirmed against the real arm, and
-the 2-D view now says so instead of hiding it.**
+**The `gen0` horn/rod lengths are not yet confirmed against the real arm, so
+absolute servo angles and gen0 FK should be treated as approximate.**
 
-The modelled 4-bar is a near-1:1 coupling, so it only closes across a slice of
-the servo travel. Measured against the current `arm_gen0_params.yaml`
-(horn 35 mm, rod 60 mm):
+With the exact 4-bar solve in place, the modelled linkage closes across nearly the
+whole servo travel on both assemblies:
 
-| | servo θ where the 4-bar closes |
-| --- | --- |
-| `gen0` | **15.1° – 93.0°** |
-| `default` | 78° – 145° |
+| | servo travel where the 4-bar closes | driver nominal travel |
+| --- | --- | --- |
+| `gen0` | **15.9° – 144.9°** | 0° – 145° |
+| `default` | **20.2° – 133.1°** | 0° – 145° |
 
-Real gen0 servos sweep **0–145°**, so most of that travel lies outside the
-modelled closure range. The renderer used to clamp those readings onto a band
-edge, which froze the drawn arm over most of the travel while the `θ` readout
-kept moving — the view looked like it was simply echoing the motor angle. It now
-draws a limb whose linkage cannot close in **orange**, rings the servo shaft, and
-prints `OUT OF LINKAGE CLOSURE` with the raw `θ` and the closing span, instead of
-presenting a frozen pose as fact.
+> An earlier version of this file reported gen0 closing over only 15.1° – 93.0°,
+> leaving most of the travel unusable. That span was an artefact of the old 4-bar
+> closed form, which did not describe a rigid linkage (see
+> [docs/KINEMATICS.md](docs/KINEMATICS.md) §3.2). The renderer still draws a limb
+> whose linkage cannot close in **orange**, rings its servo shaft, and prints
+> `ROD CANNOT REACH (orange)` with each affected limb's raw `θ`, so genuine
+> out-of-closure feedback stays visible instead of being silently clamped.
 
-**Calibration datum** (gen0, all three servos at 90°):
+**Calibration datum** (gen0, all three servos commanded to 90°):
 
 | | value |
 | --- | --- |
 | measured | `z ≈ -300 mm` |
-| model predicts | `z = -325 mm` (arm φ 97.4°) |
-| arm φ that would give `-300 mm` | **≈ 81°** |
+| model predicts | `z ≈ -280 mm` (arm φ 43.8°) |
 
-So the model over-reads the arm angle by roughly **16°** at mid-travel. The
-`base_radius` / `platform_radius` / `upper_arm_len` / `lower_arm_len` values are
-consistent with the measurement; the **servo linkage** (horn length, rod length,
-`arm_attach_dist`, and the horn's mounting zero / `home_offset`) is what needs
-measuring on the real arm. Until then, treat gen0 absolute FK as approximate and
-do not use it as a position reference.
+So the model now lands within ~20 mm of the datum. The remaining error is the
+**servo linkage**: horn length, rod length, `arm_attach_dist`, and the horn's
+mounting zero (`home_offset`, still `0`). Until those are measured on the real
+arm, do not use gen0 absolute FK as a position reference.
+
+For scale, the two hardware anchors and what the model says for them:
+
+| anchor | model |
+| --- | --- |
+| servo 30° ↔ arm 0° | arm ≈ 8.0° |
+| servo 145° ↔ arm 80° | arm ≈ 78.1° (the band's top edge) |
 
 ## 8. Troubleshooting
 
@@ -729,5 +733,11 @@ Expected when the bus-servo adapter is not attached, and harmless in
 
 ## 9. References
 
-* [3DOF Delta Arm](https://people.ohio.edu/williams/html/PDF/DeltaKin.pdf)
+* R. L. **Williams II**, *The Delta Parallel Robot: Kinematics Solutions*,
+  Ohio University — <https://people.ohio.edu/williams/html/PDF/DeltaKin.pdf>.
+  This is the source of the stage-1 inverse kinematics
+  (`delta_inverse_kinematics_arm()`); its `A`/`B`/`C`/`D` link notation and its
+  per-limb "pick the root with the smaller |θ|" assembly-mode heuristic are kept
+  verbatim in the code. Derivation and notation table in
+  [docs/KINEMATICS.md](docs/KINEMATICS.md) §2.
 * [FashionStart UART Servo C++ Driver](https://github.com/servodevelop/fashionstar-uart-servo-cpp.git)

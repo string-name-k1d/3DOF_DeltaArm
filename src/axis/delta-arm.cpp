@@ -1,5 +1,6 @@
 #include "arm/delta_arm.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <sstream>
@@ -24,108 +25,210 @@ constexpr float kDegToRad = 0.017453292519943295f;
 constexpr float kRadToDeg = 57.29577951308232f;
 constexpr float kCos120 = -0.5f;
 constexpr float kSin120 = 0.8660254037844386f; // sqrt(3)/2
+constexpr float kHalfPi = 1.57079632679489661923f;
 
 /**
- * Solves the per-limb delta IK for the real mechanism:
+ * Inverse kinematics for ONE limb of a 3-DOF delta arm, transcribed step by step
+ * from
  *
- *   * the three motor pivots lie on a circle of radius `t` about the base axis
- *     (equilateral, one pivot per limb plane);
- *   * the end-effector platform triangle has the SAME orientation as the base
- *     triangle, so the platform joint of a limb sits on the SAME radial line as
- *     its motor, at radius `pr` from the effector centre;
- *   * a limb of radius rf sweeps from the motor pivot, and the lower rod of
- *     length re closes from the upper-arm end (elbow) to the platform joint.
+ *   R. L. Williams II, "The Delta Parallel Robot: Kinematics Solutions",
+ *   Ohio University (linked from arm/README.md).
  *
- * `(x0, y0, z0)` is the end-effector centre in the limb's coordinate frame
- * (axis y = the limb's outward radial, z = up). Returns the motor angle in
- * DEGREES with the arm convention 0 deg = limb straight out, growing angle
- * sweeps the limb downward. Throws if the point is unreachable.
+ * The paper's notation is kept verbatim so the code reads against it:
  *
- * Closed form: with A = (0,-t) the pivot, V = (x0, y0-pr, z0) the platform
- * joint and E(b) = (0, -t - rf*cos(b), -rf*sin(b)) the elbow:
+ *   D_vec = (x0, y0, z0)  end-effector (platform) centre, world frame
+ *   e_i    = (cos phi_i, sin phi_i, 0)   unit vector along limb i's radial
+ *   e_z    = (0, 0, 1)
+ *   A      = |A_i|              origin      -> shoulder       (base_radius)
+ *   B      = |A_i - B_i|        shoulder    -> elbow          (upper_arm_len)
+ *   C      = |B_i - C_i|        elbow       -> platform joint (lower_arm_len)
+ *   D      = |D_vec - C_i|      origin      -> platform joint (platform_radius)
  *
- *   (rf*cos b + Y)^2 + (rf*sin b + Z)^2 = re^2 - x0^2
- *     where  Y = t + y0 - pr,  Z = z0
- *   =>  Y*cos b + Z*sin b = (re^2 - x0^2 - rf^2 - Y^2 - Z^2) / (2*rf)  = M
- *   =>  b = phi +- acos(M/rho),  phi = atan2(Z, Y),  rho = |(Y,Z)|.
+ * Positions, exactly as the paper writes them:
+ *   A_i = A e_i                                     shoulder
+ *   C_i = D_vec + D e_i                             platform joint
+ *   B_i = A_i + B (e_i cos(theta_i) - e_z sin(theta_i))   elbow
  *
- * Exactly one of the two roots corresponds to the outward-hanging arm; it is
- * the one with the smallest |b|.
+ * so the arm angle theta_i runs from 0 (limb straight out radially) and grows as
+ * the elbow descends, matching this codebase's sign convention.
+ *
+ * The shoulder and the platform joint both lie in the plane spanned by
+ * (e_i, e_z), so only the radial and vertical components of D_vec enter the
+ * closure equation - see step 4 for how the perpendicular one is folded in.
+ *
+ * @param x0,y0,z0  target centre in millimetres.
+ * @param phi_i     world angle of limb i's radial; see ik_stage1 for the -90 deg
+ *                  offset this codebase applies to the paper's 2*pi*i/3.
+ * @param A,B,C,D   the four link lengths in millimetres.
+ * @param bypass    when true an out-of-workspace target is clamped to the
+ *                  nearest tangent pose instead of throwing.
+ *
+ * @return theta_i in RADIANS.
+ * @throws std::invalid_argument when the target is unreachable.
  */
-float delta_calc_angle_yz(float x0, float y0, float z0,
-                          float t, float pr, float rf, float re) {
-    const float Y = t + y0 - pr;
-    const float Z = z0;
-    const float rho_sq = Y * Y + Z * Z;
+float delta_inverse_kinematics_arm(float x0, float y0, float z0,
+                                   float phi_i, float A, float B, float C, float D,
+                                   bool bypass = false) {
+    // Step 1: project the target onto limb i's radial axis.  In the rotated
+    // frame e_i is the +x axis, so this is simply p = D_vec . e_i, and
+    //   |D_vec|^2 = p^2 + q^2 + z0^2
+    // with q the perpendicular component of the target.
+    const float p = x0 * std::cos(phi_i) + y0 * std::sin(phi_i);
+    const float d2 = x0 * x0 + y0 * y0 + z0 * z0;  // |D_vec|^2
+
+    // Step 2: the platform joint C_i = D_vec + D e_i lies at radial (p + D),
+    //         height z0, and off-plane by q.
+    // Step 3: the elbow B_i lies at radial (A + B cos theta_i), height
+    //         (-B sin theta_i), and on-plane.
+    //
+    // Step 4: impose the rod constraint |B_i - C_i| = C and collect theta_i:
+    //
+    //   (A + B cos(theta_i) - p - D)^2 + (B sin(theta_i) + z0)^2 + q^2 = C^2
+    //
+    // Reducing with cos^2 + sin^2 = 1, and replacing (D + p)^2 + q^2 by
+    // d^2 + 2 D p + D^2, gives the linear equation
+    //
+    //     P + Q cos(theta_i) + R sin(theta_i) = 0
+    const float P = (A - D) * (A - D) - 2.0f * (A - D) * p + d2 + B * B - C * C;
+    const float Q = 2.0f * B * (A - D - p);
+    const float R = 2.0f * B * z0;
+
+    // Step 5: the workspace test.  Writing (Q/2B, R/2B) = rho (cos psi,
+    // sin psi), the equation is rho cos(theta_i - psi) = -P/2, hence
+    //   -P^2 + Q^2 + R^2 = 4 B^2 rho^2 (1 - cos^2(theta_i - psi)) >= 0.
+    // A negative value means no real elbow exists: the limb cannot span the
+    // target at all.  The shoulder sitting on the platform joint is separately
+    // degenerate, because then the rod triangle and the arm angle collapse.
+    const float rho_sq = (A - D - p) * (A - D - p) + z0 * z0;
     if (rho_sq < 1e-6f) {
         throw std::invalid_argument("Unreachable delta target (on-axis singularity)");
     }
 
-    const float M = (re * re - x0 * x0 - rf * rf - rho_sq) / (2.0f * rf * std::sqrt(rho_sq));
-    if (M < -1.0f || M > 1.0f) {
-        throw std::invalid_argument("Unreachable delta target (circle miss)");
+    float disc = -P * P + Q * Q + R * R;
+    if (disc < 0.0f) {
+        if (!bypass) {
+            throw std::invalid_argument("Unreachable delta target (circle miss)");
+        }
+        // Diagnostic mode: clamp to the tangent pose, the closest point of this
+        // limb's reachable surface.  Note the tangent the clamp lands on is
+        // still selected by P's sign through the Q and R above, so over- and
+        // under-reach clamp to the two different tangencies.
+        disc = 0.0f;
     }
 
-    const float phi = std::atan2(Z, Y);
-    const float delta = std::acos(M);
-    float th0 = phi + delta;
-    float th1 = phi - delta;
-    if (std::fabs(th1) < std::fabs(th0)) th0 = th1;
+    // Step 6: the half-angle substitution t = tan(theta_i / 2) turns the
+    // equation into the quadratic
+    //
+    //     (P - Q) t^2 + 2 R t + (P + Q) = 0
+    //
+    // whose two roots give the assembly modes.  Undoing the substitution with
+    // atan2 rather than the paper's atan keeps the result correct in every
+    // quadrant, including the degenerate case P == Q.
+    const float root = std::sqrt(disc);
+    const float denom = P - Q;
+    float th0 = 2.0f * std::atan2(-R + root, denom);
+    float th1 = 2.0f * std::atan2(-R - root, denom);
 
-    return th0 * kRadToDeg;
+    // Both modes come out in (-2*pi, 2*pi]; fold each into (-pi, pi].
+    auto fold = [](float a) {
+        while (a > kPi) a -= kTwoPi;
+        while (a <= -kPi) a += kTwoPi;
+        return a;
+    };
+    th0 = fold(th0);
+    th1 = fold(th1);
+
+    // Step 7: assembly mode.  The paper resolves each limb independently by
+    // taking the root closest to the home (fully lowered) position, i.e. the
+    // smaller |theta_i|, which folds up instead of inverting through the top as
+    // the target crosses the axis.  Hard-coded rather than configurable.
+    const float th = (std::fabs(th0) <= std::fabs(th1)) ? th0 : th1;
+
+    if (!std::isfinite(th)) {
+        throw std::invalid_argument("Unreachable delta target (degenerate limb)");
+    }
+    return th;
 }
 
 /**
- * Non-throwing 4-bar closed form: arm angle (rad) -> motor angle (rad), folded
- * into [0, 2*pi) with the driver's convention (0 deg = limb fully extended,
- * growing angle = arm sweeping downward).
+ * Exact 4-bar solve for one limb, done entirely in that limb's own (radial, z)
+ * plane:
  *
- *   a = horn (upper_rod_len)   b = rod (servo_rod_len)
- *   c = shoulder -> socket     d = servo -> shoulder (ground)
- *   theta_b = pi - arm_angle
- *   A = 2 a d cos(theta_b) - 2 b d
- *   B = 2 a d sin(theta_b)
- *   C = c^2 - a^2 - b^2 - d^2 + 2 a b cos(theta_b)
- *   motor = 2*pi - (atan2(B, A) + acos(C / |(A,B)|))        (+ home offset, deg)
+ *   O = (servo_radius, servo_z)   servo output shaft, i.e. the horn pivot
+ *   S = (base_radius, 0)          shoulder pivot
+ *   P(theta_arm)                  socket on the upper arm, |P - S| = cc
  *
- * Returns NaN when the linkage CANNOT close, which takes two independent
- * conditions: the rigid rod must span the servo shaft and the arm-side socket,
- * AND the horn solve must have a real acos argument. Both are needed - rod
- * reach alone admits angles where the algebra has no solution (short horn with
- * a long rod). This is the single shared predicate for both directions of the
- * solve, so the IK and the forward kinematics can never disagree about which
- * arm angles are reachable.
+ *   a = |E - O| = upper_rod_len   horn  (crank)
+ *   b = |E - P| = servo_rod_len   rod   (coupler)
+ *
+ * The horn pin E is therefore the intersection of circle(O, a) with circle(P, b),
+ * which is what is solved below.  This replaces an earlier atan2/acos closed
+ * form, which did not describe a rigid horn: sweeping the arm in small steps and
+ * differencing its output gave crank increments drifting from about +3 deg to
+ * -13 deg instead of staying at 0, so the arm could not be driven smoothly.
+ *
+ * Returns the servo angle in RADIANS folded into [0, 2*pi) with the driver's
+ * convention - 0 deg = horn pointing straight out from the servo, growing angle =
+ * horn sweeping DOWNWARD, which is what fits the nominal [0, 145] deg travel.
+ *
+ * Returns NaN when the linkage cannot close, i.e. when the rod is too short or
+ * too long to span the shaft and the socket: |a - b| <= |P - O| <= a + b.  That is
+ * the complete closure condition for this 4-bar and it is the single shared
+ * predicate for both directions of the solve, so the IK and the forward
+ * kinematics can never disagree about which arm angles are reachable.
  */
 float four_bar_motor_angle(float theta_arm, const ArmMechConfig& c) {
+    // Socket on the upper arm. The two terms rotate the arm-side offset with the
+    // arm angle, and hypot(arm_attach_dist, arm_attach_offset) is the constant
+    // shoulder -> socket length, so |P - S| = cc at every arm angle.
+    const float px = c.base_radius + c.arm_attach_dist * std::cos(theta_arm) -
+                     c.arm_attach_offset * std::sin(theta_arm);
+    const float py = -c.arm_attach_dist * std::sin(theta_arm) -
+                     c.arm_attach_offset * std::cos(theta_arm);
+
     const float a = c.upper_rod_len;
     const float b = c.servo_rod_len;
 
-    const float sr = c.base_radius + c.arm_attach_dist * std::cos(theta_arm) -
-                     c.arm_attach_offset * std::sin(theta_arm);
-    const float sz = -c.arm_attach_dist * std::sin(theta_arm) -
-                     c.arm_attach_offset * std::cos(theta_arm);
-    const float dist = std::hypot(sr - c.servo_radius, sz - c.servo_z);
-    if (dist > a + b + 1e-3f || dist < std::fabs(a - b) - 1e-3f) {
+    // Vector from the servo shaft to the socket, and its length d.
+    const float dx = px - c.servo_radius;
+    const float dy = py - c.servo_z;
+    const float d = std::hypot(dx, dy);
+
+    // Closure: the two links must be able to meet at a point on the line O -> P.
+    if (d < 1e-6f || d > a + b + 1e-3f || d < std::fabs(a - b) - 1e-3f) {
         return std::numeric_limits<float>::quiet_NaN();
     }
 
-    const float cc = std::hypot(c.arm_attach_dist, c.arm_attach_offset);
-    const float dd = std::hypot(c.base_radius - c.servo_radius, -c.servo_z);
-    const float tb = kPi - theta_arm;
-    const float A = 2.0f * a * dd * std::cos(tb) - 2.0f * b * dd;
-    const float B = 2.0f * a * dd * std::sin(tb);
-    const float C = cc * cc - a * a - b * b - dd * dd + 2.0f * a * b * std::cos(tb);
-    const float u = C / std::hypot(A, B);
-    if (u < -1.0f || u > 1.0f) {
-        return std::numeric_limits<float>::quiet_NaN();
-    }
+    // Circle-circle intersection. Along the O -> P line the horn pin sits
+    // `along` from O, and `h` off the line. `along` is the projection of the
+    // a-length leg onto d, and h is the altitude of the triangle with sides
+    // a, b, d.
+    const float along = (d * d + a * a - b * b) / (2.0f * d);
+    // max() only absorbs the tolerance slop of the closure test above.
+    const float h = std::sqrt(std::max(0.0f, a * a - along * along));
 
-    return kTwoPi - (std::atan2(B, A) + std::acos(u));
+    // Foot of the perpendicular from E onto the O -> P line, then the pin itself.
+    const float fx = c.servo_radius + along * (dx / d);
+    const float fy = c.servo_z + along * (dy / d);
+
+    // Assembly mode. The machine is built with the horn pin on the CLOCKWISE
+    // side of the directed line O -> P: that is the branch whose servo angle
+    // rises monotonically as the arm sweeps downward, while the other pin is the
+    // fold-through-the-top branch. The two pins coincide only when h == 0, a
+    // toggle of the crank where the pin flips over, and the band scan already
+    // rejects those, so this rule is continuous over every valid band.
+    const float hx = fx + h * (dy / d);
+    const float hy = fy - h * (dx / d);
+
+    // Servo angle of the horn, measured from the horizon and growing downward.
+    float ang = std::atan2(c.servo_z - hy, hx - c.servo_radius);
+    if (ang < 0.0f) ang += kTwoPi;
+    return ang;
 }
 
 /**
  * True when the servo 4-bar linkage can physically close at this arm angle
- * (radians). See four_bar_motor_angle() for the closure conditions.
+ * (radians). See four_bar_motor_angle() for the closure condition.
  */
 bool linkage_closes(float theta_arm, const ArmMechConfig& c) {
     return !std::isnan(four_bar_motor_angle(theta_arm, c));
@@ -377,35 +480,31 @@ bool Arm::try_arm_from_motor_deg(float motor_deg, int leg, float & arm_out) cons
 /**
  * STAGE 1 - task-space target -> per-limb plane orientation.
  *
- * For each limb, rotate the 3D target into that limb's local frame (so the
- * limb lies in its yz-plane) and solve the classic delta IK. The resulting
- * upper-arm angle (stored in stage1_thetas_[]) is the per-limb orientation
- * angle that stage 2 maps to a motor angle.
+ * For each limb, solve the classic delta IK of Williams II, "The Delta Parallel
+ * Robot: Kinematics Solutions" (see arm/README.md), transcribed step by step in
+ * delta_inverse_kinematics_arm() above. The resulting upper-arm angle (stored in
+ * stage1_thetas_[], RADIANS) is the per-limb orientation angle that stage 2 maps
+ * to a motor angle.
  */
+
 void Arm::ik_stage1(const Vec3& target) {
     // Convert metres -> millimetres (the geometry uses mm).
     const float x = target.x * 1000.0f;
     const float y = target.y * 1000.0f;
     const float z = target.z * 1000.0f;
 
-    // Shoulder-pivot radius: the arm's base joints sit ON the base-plate
-    // corner circle (base_radius). The effector joints sit at platform_radius,
-    // which is INBOARD of the shoulders (classic delta). Same radii/pivots as
-    // the forward kinematics and the visualizer.
-    const float t = configs_[0].base_radius;
-
     for (int leg = 0; leg < 3; ++leg) {
-        // Rotate the target into the limb's frame (the limb's plane becomes the
-        // yz-plane). The angle for leg 0 is 0; legs 1 & 2 at +-120 deg.
         const ArmMechConfig& c = configs_[leg];
-        const float ca = std::cos(c.plane_angle);
-        const float sa = std::sin(c.plane_angle);
-        const float rx = x * ca + y * sa;
-        const float ry = -x * sa + y * ca;
-
-        // Upper-arm angle in degrees for this limb (real-mechanism solver).
-        const float theta_deg = delta_calc_angle_yz(rx, ry, z, t, c.platform_radius, c.upper_arm_len, c.lower_arm_len);
-        stage1_thetas_[leg] = theta_deg * kDegToRad;
+        // The paper sets phi_i = 2*pi*i/3, which would put shoulder 0 on +X.
+        // This codebase numbers the motors with limb 0 toward -Y instead (see
+        // ArmMechConfig::plane_angle and the renderer), so every radial carries a
+        // constant -90 deg offset from the paper's. That single constant is the
+        // only difference between the two conventions.
+        const float phi_i = c.plane_angle - kHalfPi;
+        // Per-limb upper-arm angle in RADIANS.
+        stage1_thetas_[leg] = delta_inverse_kinematics_arm(
+            x, y, z, phi_i, c.base_radius, c.upper_arm_len,
+            c.lower_arm_len, c.platform_radius, c.bypass_reachability);
     }
 }
 
@@ -413,25 +512,20 @@ void Arm::ik_stage1(const Vec3& target) {
  * STAGE 2 - limb plane orientation -> motor joint angle (degrees).
  *
  * The servo does NOT turn the arm directly: it drives a 4-bar linkage, so the
- * limb angle and motor angle are NON-linear functions of one another. With
- *   a = horn (upper_rod_len)     b = rod (servo_rod_len)
- *   c = shoulder->socket         d = servo->shoulder (ground)
- * and  theta_b = 180 deg - (arm angle), the motor-side horn angle solves
- *   A = 2 a d cos(theta_b) - 2 b d
- *   B = 2 a d sin(theta_b)
- *   C = c^2 - a^2 - b^2 - d^2 + 2 a b cos(theta_b)
- *   theta_a = atan2(B, A) +- acos( C / |(A,B)| )      (closed form)
- * The arm-side link is length `c`, so c = hypot(arm_attach_dist,
- * arm_attach_offset) and the ground link is d = servo->shoulder length.
- * The "+" acos branch is the physically-continuous one in the closing band.
+ * limb angle and motor angle are NON-linear functions of one another. The solve
+ * is geometric and exact - the horn pin is the intersection of the circle of
+ * radius `a` (horn, upper_rod_len) about the servo shaft with the circle of
+ * radius `b` (rod, servo_rod_len) about the arm-side socket. See
+ * four_bar_motor_angle() above for the derivation and for how the assembly mode
+ * is chosen.
  *
- * The result is folded into the range [0, 2pi) with the convention 0 deg =
- * limb fully extended and GROWING angle sweeping the arm DOWNWARD (fits the
- * driver's nominal [0,145] deg range), then the home/calibration offset is
- * added. The algebra lives in four_bar_motor_angle(); this wrapper only turns
- * "the linkage cannot close" into an exception so the IK has something to
- * report. Callers should normally have checked the limb's reachable band
- * first (see compute_linkage_bands()), which is tighter than closure alone.
+ * The result is folded into the range [0, 2pi) with the convention 0 deg = horn
+ * straight out and GROWING angle sweeping the arm DOWNWARD (fits the driver's
+ * nominal [0,145] deg range), then the home/calibration offset is added. The
+ * geometry lives in four_bar_motor_angle(); this wrapper only turns "the linkage
+ * cannot close" into an exception so the IK has something to report. Callers
+ * should normally have checked the limb's reachable band first (see
+ * compute_linkage_bands()), which is tighter than closure alone.
  */
 float Arm::motor_from_arm(float theta_arm, int leg) const {
     const float motor = four_bar_motor_angle(theta_arm, configs_[leg]);
@@ -483,6 +577,30 @@ float Arm::arm_from_motor(float motor_rad, int leg) const {
     return 0.5f * (lo + hi);
 }
 
+float Arm::nearest_closeable_arm_angle(float theta_arm, int leg) const {
+    const ArmMechConfig& c = configs_[leg];
+    if (!std::isnan(four_bar_motor_angle(theta_arm, c))) return theta_arm;
+
+    // Scan the configured arm window for the closest angle that closes. The
+    // window is only a few hundred degrees wide, so a dense sweep is cheap and
+    // sidesteps the branch structure entirely.
+    const float lo = c.arm_angle_min;
+    const float hi = c.arm_angle_max;
+    constexpr int kSteps = 1440;
+    float best = std::numeric_limits<float>::quiet_NaN();
+    float best_d = std::numeric_limits<float>::infinity();
+    for (int i = 0; i <= kSteps; ++i) {
+        const float t = lo + (hi - lo) * (static_cast<float>(i) / static_cast<float>(kSteps));
+        if (std::isnan(four_bar_motor_angle(t, c))) continue;
+        const float d = std::fabs(t - theta_arm);
+        if (d < best_d) {
+            best_d = d;
+            best = t;
+        }
+    }
+    return best;
+}
+
 float Arm::ik_stage2(float theta, int leg) {
     // The band check is the reachable test. motor_from_arm() would only reject
     // arm angles outside the linkage's closure region; the band is tighter (it
@@ -490,18 +608,62 @@ float Arm::ik_stage2(float theta, int leg) {
     // driver could not actually hold is refused here instead of being commanded
     // and then silently clamped by the servo.
     if (!band_valid_[leg] || theta < band_lo_[leg] || theta > band_hi_[leg]) {
-        std::ostringstream os;
-        os << "leg " << leg << " needs arm angle " << (theta * kRadToDeg) << " deg, outside the reachable band ";
-        if (band_valid_[leg]) {
-            os << "[" << (band_lo_[leg] * kRadToDeg) << ", " << (band_hi_[leg] * kRadToDeg) << "] deg";
+        if (configs_[leg].bypass_reachability) {
+            // Diagnostic mode: do not refuse. Fall back to the nearest arm angle
+            // at which the linkage closes at all, so the run continues and the
+            // resulting pose can be compared against the real mechanism.
+            const float t = nearest_closeable_arm_angle(theta, leg);
+            if (std::isnan(t)) {
+                std::ostringstream os;
+                os << "leg " << leg << " cannot close at ANY arm angle in ["
+                   << (configs_[leg].arm_angle_min * kRadToDeg) << ", "
+                   << (configs_[leg].arm_angle_max * kRadToDeg)
+                   << "] deg with bypass_reachability on";
+                throw std::invalid_argument(os.str());
+            }
+            theta = t;
         } else {
-            os << "(empty: the linkage cannot close within the servo's travel)";
+            std::ostringstream os;
+            os << "leg " << leg << " needs arm angle " << (theta * kRadToDeg) << " deg, outside the reachable band ";
+            if (band_valid_[leg]) {
+                os << "[" << (band_lo_[leg] * kRadToDeg) << ", " << (band_hi_[leg] * kRadToDeg) << "] deg";
+            } else {
+                os << "(empty: the linkage cannot close within the servo's travel)";
+            }
+            throw std::invalid_argument(os.str());
         }
-        throw std::invalid_argument(os.str());
     }
 
     const float motor_rad = motor_from_arm(theta, leg);
-    return (motor_rad + configs_[leg].home_offset) * kRadToDeg;
+    float cmd_deg = (motor_rad + configs_[leg].home_offset) * kRadToDeg;
+
+    // Bypass mode deliberately resolves out-of-envelope targets to an arm angle
+    // that merely CLOSES the linkage, ignoring the servo-travel term of the
+    // band. The matching motor angle can therefore sit far outside the servo's
+    // travel (gen0 gives 230 deg, or 356 deg for a shallow goal), i.e. a servo
+    // angle the mechanism cannot hold and the driver would only clamp silently.
+    //
+    // Clamp the COMMANDED angle - the same post-home_offset quantity
+    // compute_linkage_bands() tests and the driver limits - into the
+    // intersection of the driver's travel and the band's closure span. Both
+    // bounds are needed: the travel alone still permits angles below the
+    // linkage's low closure limit (gen0 clamps to 6 deg, which does not close),
+    // while the closure span alone already implies the travel. The result is that
+    // bypass can never publish an unphysical or unresolvable servo target, and
+    // forward kinematics agrees with the command instead of quietly re-clamping.
+    // No-op for in-band poses, which satisfy both bounds by construction.
+    if (configs_[leg].bypass_reachability) {
+        float lo = configs_[leg].motor_angle_min;
+        float hi = configs_[leg].motor_angle_max;
+        if (band_valid_[leg]) {
+            lo = std::max(lo, (motor_from_arm_unchecked(band_lo_[leg], leg) +
+                               configs_[leg].home_offset) * kRadToDeg);
+            hi = std::min(hi, (motor_from_arm_unchecked(band_hi_[leg], leg) +
+                               configs_[leg].home_offset) * kRadToDeg);
+        }
+        cmd_deg = std::clamp(cmd_deg, lo, hi);
+    }
+    return cmd_deg;
 }
 
 void Arm::compute_ik(const Vec3& target) {

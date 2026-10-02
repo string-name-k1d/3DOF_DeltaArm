@@ -32,7 +32,9 @@ struct Vec3
  * directly: a horn (upper_rod_len) keyed to the servo shaft, a connecting rod
  * (servo_rod_len) to a bracket on the upper arm (arm_attach_dist along the arm
  * axis + arm_attach_offset perpendicular standoff). Stage-2 IK solves that
- * linkage's closed form to map limb angle <-> motor angle.
+ * linkage exactly - the horn pin is the intersection of the horn circle
+ * about the servo shaft with the rod circle about the arm bracket - to map
+ * limb angle <-> motor angle.
  *
  * All lengths are in millimetres; the task-space interface (set_tar_pos) uses
  * metres, which are converted internally to millimetres so the geometry keeps
@@ -84,6 +86,28 @@ struct ArmMechConfig
   float plane_angle = 0.0f;      // angle (radians) of this limb's vertical
                                  // plane around the base's central axis
   float home_offset = 0.0f;      // motor home/calibration offset (radians)
+
+  // bypass_reachability: TEMPORARY diagnostic switch, default false (the guard
+  // is ON). With it false the IK REFUSES any target outside the reachable
+  // envelope - both the stage-1 circle miss and the stage-2 band check - and
+  // reports which leg failed. With it true those refusals are suppressed and the
+  // target is resolved to the NEAREST arm angle at which the linkage physically
+  // closes, ignoring the servo-travel, monotonicity and arm-window terms of the
+  // band. This lets a run proceed through poses the model believes are out of
+  // range so the mismatch can be observed on the real mechanism.
+  //
+  // It is deliberately NOT "accept anything": if the linkage cannot close at any
+  // arm angle in the window the IK still throws, because no pose exists to
+  // command. Set it back to false to restore the guard.
+  //
+  // The resolved motor angle is clamped into [motor_angle_min, motor_angle_max]
+  // intersected with the limb's closure span, so bypass can never publish a
+  // servo angle the mechanism cannot hold - it used to emit 230 deg, or 356 deg
+  // for a shallow goal, which the driver would only have clamped silently. Both
+  // bounds are needed: the travel alone still permits angles below the linkage's
+  // low closure limit. It is still a diagnostic mode and still not a substitute
+  // for real geometry, so do not treat a bypassed pose as reachable.
+  bool bypass_reachability = false;
 };
 
 /**
@@ -203,8 +227,9 @@ private:
   void ik_stage1(const Vec3 & target);      ///< task-space -> limb plane orientations
   float ik_stage2(float theta, int leg);   ///< limb plane orientation -> motor angle (deg)
 
-  /// @brief 4-bar linkage solve: arm angle (rad) -> motor angle (rad), using the
-  ///        closed form (a=horn, b=rod, c=shoulder->socket, d=servo->shoulder).
+  /// @brief 4-bar linkage solve: arm angle (rad) -> motor angle (rad). Exact: the
+  ///        horn pin is the intersection of circle(servo shaft, a=horn) with
+  ///        circle(arm bracket, b=rod), and c=shoulder->socket, d=servo->shoulder.
   ///        Throws std::invalid_argument when the linkage cannot close.
   float motor_from_arm(float theta_arm, int leg) const;
   /// @brief Same solve, but assumes the arm angle is already known to close
@@ -215,6 +240,14 @@ private:
   ///        bisection over the limb's reachable band; clamped to the band edges.
   ///        Never throws.
   float arm_from_motor(float motor_rad, int leg) const;
+
+  /// @brief Nearest arm angle at which the 4-bar linkage physically closes.
+  ///
+  /// Serves bypass_reachability: the requested arm angle is returned unchanged
+  /// when it already closes, otherwise the closest angle in
+  /// [arm_angle_min, arm_angle_max] that does. Returns NaN when the linkage
+  /// closes nowhere in that window. Never throws.
+  float nearest_closeable_arm_angle(float theta_arm, int leg) const;
 
   void compute_ik(const Vec3 & target);     ///< runs stage 1 + stage 2, fills tar_angles_
 

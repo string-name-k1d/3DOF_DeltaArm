@@ -97,7 +97,7 @@ arm_endpoint:
       # upper_arm_len: arm actuation joint -> elbow rod length (mm) (rf).
       upper_arm_len: 120.0
       # lower_arm_len: elbow -> platform joint rod length (mm) (re).
-      lower_arm_len: 240.0
+      lower_arm_len: 250.0
 
       # servo_radius: circumradius (mm) of the three servo output shafts (S
       #   joints). The servos mount UNDER the base plate (so servo_z < 0 puts
@@ -105,7 +105,7 @@ arm_endpoint:
       #   arm shoulders at base_radius.
       servo_radius: 60.0
       # servo_z: height (mm) of the servo output shafts below the pivot plane.
-      servo_z: -22.5
+      servo_z: -25.0
       # upper_rod_len: length (mm) of the SERVO HORN (the short motor crank
       #   fixed to the servo shaft; 4-bar link `a`).
       upper_rod_len: 35.0
@@ -134,6 +134,19 @@ arm_endpoint:
       # rod_spread: lateral separation (mm) of the two parallel bars of each
       #   lower arm (elbow -> platform), visual only.
       rod_spread: 8.0
+
+      # bypass_reachability: TEMPORARY diagnostic switch.
+      #   false (default, and what you want normally) = the IK REFUSES any
+      #     target outside the reachable envelope, reporting which leg failed
+      #     ("circle miss" or "outside the reachable band").
+      #   true = those refusals are suppressed and the target is resolved to the
+      #     NEAREST arm angle at which the 4-bar linkage physically closes,
+      #     ignoring the servo-travel / monotonicity / arm-window terms. Lets a
+      #     run proceed through poses the model thinks are out of range so the
+      #     mismatch can be compared against the real mechanism.
+      #   It still throws if the linkage closes nowhere in the arm window - no
+      #   pose exists to command. Set back to false to restore the guard.
+      bypass_reachability: true
 
       # motor_positions / platform_offsets: optional explicit joint positions
       #   in the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2].

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -35,17 +36,22 @@ DeltaArm::ArmMechConfig defaultLimb(int leg)
 }
 
 // The gen0 assembly (arm/config/arm_gen0_params.yaml), which deliberately uses
-// the OPPOSITE horn/rod proportions (horn 35, rod 60) and a smaller platform
-// radius. The two are separate physical machines, not variants of one.
+// the OPPOSITE horn/rod proportions (horn 35, rod 60) to the default. The two are
+// separate physical machines, not variants of one. These values must track that
+// YAML: it is the assembly the hardware actually has, and the envelope tests below
+// only mean anything if they describe the real linkage.
 DeltaArm::ArmMechConfig gen0Limb(int leg)
 {
   DeltaArm::ArmMechConfig c;
-  c.base_radius = 95.0f;
-  c.platform_radius = 43.3f;
+  c.base_radius = 100.0f;
+  c.platform_radius = 32.5f;
+  c.lower_arm_len = 250.0f;
   c.servo_radius = 60.0f;
+  c.servo_z = -25.0f;
   c.upper_rod_len = 35.0f;
   c.servo_rod_len = 60.0f;
   c.arm_attach_dist = 52.0f;
+  c.arm_attach_offset = 20.5f;
   c.plane_angle = leg * kTwoPiOver3;
   return c;
 }
@@ -260,18 +266,30 @@ TEST(DeltaArm, EveryAcceptedGoalNeedingOverNinetyDegreesRoundTrips)
 }
 
 // A pose needing MORE arm angle than the servo can deliver is genuinely
-// unreachable, and must now be refused rather than silently clamped. This was
-// the worst case in the old build: this exact target was 63.7 mm from the
-// command, because leg 1 wanted 120.8 deg and the forward kinematics quietly
-// clamped it to 90 deg. The motor angles the old code produced were plausible,
-// so nothing looked wrong on screen.
+// unreachable, and must be refused rather than silently clamped. This was the
+// worst case in the old build: the commanded pose and the drawn/streamed pose
+// disagreed by up to 64 mm while the motor angles the IK produced looked
+// perfectly plausible, so nothing appeared wrong on screen.
+//
+// gen0 is the assembly that exercises this, because with its horn 35 / rod 60
+// proportions the top of the usable arm band lands on the 145 deg servo stop
+// rather than on the linkage folding over. A pose past that stop must be
+// refused with a reason, and nothing may be committed.
 TEST(DeltaArm, PoseNeedingPastServoStopIsRefusedNotClamped)
 {
   DeltaArm::Arm arm(nullptr);
+  arm.set_geometry(limbs(&gen0Limb));
   arm.init();
 
-  const DeltaArm::TargetResult r = arm.set_tar_pos(-0.12f, -0.10f, -0.28f);
-  EXPECT_FALSE(r.reached) << "needs a 120.8 deg arm angle, beyond the 145 deg servo stop";
+  // Reachable: arm 74.5 deg -> servo 136.8 deg, inside the 145 deg stop.
+  const DeltaArm::TargetResult inside = arm.set_tar_pos(0.0f, 0.0f, -0.345f);
+  ASSERT_TRUE(inside.reached) << inside.reason;
+
+  // One step deeper needs arm 78.3 deg, i.e. servo > 145 deg: past the stop.
+  // (It is refused by the SERVO stop, not by the stage-1 circle, which only
+  // gives out further down at about -365 mm.)
+  const DeltaArm::TargetResult r = arm.set_tar_pos(0.0f, 0.0f, -0.350f);
+  EXPECT_FALSE(r.reached) << "needs arm 78.3 deg, which is past the 145 deg servo stop";
   EXPECT_FALSE(r.reason.empty()) << "the refusal must say which limb and what it needed";
 
   // Nothing may be committed, so the arm stays put instead of drifting to a
@@ -344,9 +362,14 @@ TEST(DeltaArm, FourBarMotorAnglesInRangeAndMonotone)
 }
 
 // The resolved band must be derived from the geometry and the travel limits,
-// not hard-coded. For the shipped assemblies it is ~[32, 100] deg on default
-// (top edge set by the 145 deg servo stop) and ~[0, 101] deg on gen0 (top edge
-// set by the linkage itself).
+// not hard-coded. The two shipped assemblies bound their bands for different
+// reasons, which is what makes this a useful test:
+//   default (arm/config/arm_params.yaml): both edges come from the linkage
+//     itself - [31.8, 124.8] deg of arm, servo only ever 20..133 deg, so
+//     neither servo stop is reached;
+//   gen0: the top edge is the 145 deg SERVO STOP (servo span ends at 144.9),
+//     while the bottom edge is the linkage closing (servo span starts at
+//     15.9 deg, well clear of the 0 deg stop).
 TEST(DeltaArm, LinkageBandIsDerivedFromGeometry)
 {
   struct Case
@@ -357,8 +380,8 @@ TEST(DeltaArm, LinkageBandIsDerivedFromGeometry)
     float expect_hi;
   };
   const Case cases[] = {
-      {"default", &defaultLimb, 32.0f, 99.6f},
-      {"gen0", &gen0Limb, 0.0f, 100.8f},
+      {"default", &defaultLimb, 31.8f, 124.8f},
+      {"gen0", &gen0Limb, 0.0f, 78.2f},
   };
 
   std::vector<float> highs;
@@ -376,21 +399,31 @@ TEST(DeltaArm, LinkageBandIsDerivedFromGeometry)
 
   // Different linkages must not share a band.
   EXPECT_NE(highs[0], highs[1]) << "default and gen0 resolved to the same upper edge";
+
+  // And the band must lie inside the servo's travel, by construction.
+  DeltaArm::Arm gen0(nullptr);
+  gen0.set_geometry(limbs(&gen0Limb));
+  float servo_lo = 0.0f;
+  float servo_hi = 0.0f;
+  ASSERT_TRUE(gen0.linkage_motor_span(0, servo_lo, servo_hi));
+  EXPECT_NEAR(servo_hi, 145.0f, 0.2f) << "gen0's top edge is the servo stop";
+  EXPECT_GT(servo_lo, 0.0f) << "gen0's bottom edge is the linkage, not the servo stop";
 }
 
 // Tightening the servo's travel must narrow the arm's envelope: the IK is
 // bounded by what the servo can physically hold, not just by what the linkage
-// can close.
+// can close. gen0 is used because there the 145 deg stop really is the top edge,
+// so pulling the stop in has something to bite on.
 TEST(DeltaArm, ServoTravelBoundsTheEnvelope)
 {
   DeltaArm::Arm wide(nullptr);
-  wide.set_geometry(limbs(&defaultLimb));
+  wide.set_geometry(limbs(&gen0Limb));
   float wide_lo = 0.0f;
   float wide_hi = 0.0f;
   ASSERT_TRUE(wide.get_linkage_band(0, wide_lo, wide_hi));
 
-  std::vector<DeltaArm::ArmMechConfig> tight = limbs(&defaultLimb);
-  for (auto & c : tight) c.motor_angle_max = 100.0f;
+  std::vector<DeltaArm::ArmMechConfig> tight = limbs(&gen0Limb);
+  for (auto & c : tight) c.motor_angle_max = 110.0f;
   DeltaArm::Arm narrow(nullptr);
   narrow.set_geometry(tight);
   float narrow_lo = 0.0f;
@@ -400,31 +433,38 @@ TEST(DeltaArm, ServoTravelBoundsTheEnvelope)
   EXPECT_NEAR(narrow_lo, wide_lo, 0.5f) << "the linkage (not the servo) sets the lower edge";
   EXPECT_LT(narrow_hi, wide_hi) << "a tighter servo stop must narrow the arm envelope";
 
-  // A deep pose needs a larger motor angle, so it must become unreachable.
-  const DeltaArm::TargetResult deep_narrow = narrow.set_tar_pos(0.0f, 0.0f, -0.33f);
-  const DeltaArm::TargetResult deep_wide = wide.set_tar_pos(0.0f, 0.0f, -0.33f);
+  // A deep pose needs a larger motor angle, so it must become unreachable. At the
+  // stock 145 deg stop this pose needs arm 62.9 deg / servo 114.6 deg and is fine;
+  // with the stop pulled to 110 deg the same pose is past it.
+  const DeltaArm::TargetResult deep_narrow = narrow.set_tar_pos(0.0f, 0.0f, -0.325f);
+  const DeltaArm::TargetResult deep_wide = wide.set_tar_pos(0.0f, 0.0f, -0.325f);
   EXPECT_TRUE(deep_wide.reached) << deep_wide.reason;
   EXPECT_FALSE(deep_narrow.reached);
   EXPECT_FALSE(deep_narrow.reason.empty());
 }
 
-// The arm-angle window is a real constraint, not decoration. The gen0 linkage
-// folds (its motor angle stops being monotone) right around 0 deg, so opening
-// the window below 0 does NOT buy a usable negative-arm envelope - there is
-// nothing there to invert. That fold is the real reason the default floor of
-// 0 deg costs gen0 nothing, and it is why the default is safe.
-TEST(DeltaArm, ArmAngleWindowBoundsTheBandButCannotBeatTheFold)
+// The arm-angle window is a real constraint, and where it stops binding, the
+// SERVO's own travel takes over. gen0's linkage closes and stays monotone all
+// the way down through negative arm angles, so opening the window below 0 does
+// buy a usable negative envelope - it ends at -6.6 deg because that is where the
+// servo reaches its 0 deg stop, not because the transmission folded. An earlier
+// version of this test asserted the opposite, on the strength of the old 4-bar
+// closed form, whose spurious "fold" near 0 deg was one of its symptoms.
+TEST(DeltaArm, ArmAngleWindowBoundsTheBandAndServoStopBoundsTheRest)
 {
   DeltaArm::Arm floored(nullptr);
   floored.set_geometry(limbs(&gen0Limb));
   float floored_lo = 0.0f;
   float floored_hi = 0.0f;
   ASSERT_TRUE(floored.get_linkage_band(0, floored_lo, floored_hi));
-  EXPECT_GE(floored_lo, 0.0f) << "negative arm angles must be off by default";
+  EXPECT_NEAR(floored_lo, 0.0f, 0.2f) << "the default floor of 0 deg is what bounds this edge";
+  float floored_servo_lo = 0.0f;
+  float floored_servo_hi = 0.0f;
+  ASSERT_TRUE(floored.linkage_motor_span(0, floored_servo_lo, floored_servo_hi));
+  EXPECT_GT(floored_servo_lo, 1.0f) << "the linkage, not the servo stop, sets this lower edge";
 
-  // Relaxing the floor must not silently claim a negative envelope: the
-  // four-bar's fold is what actually stops it, and the inverse is only valid
-  // where the transmission is monotone.
+  // Relaxing the floor extends the band into negative arm angles, and the servo
+  // 0 deg stop is what finally stops it.
   std::vector<DeltaArm::ArmMechConfig> opened = limbs(&gen0Limb);
   for (auto & c : opened) c.arm_angle_min = -30.0f * kDegToRad;
   DeltaArm::Arm open(nullptr);
@@ -432,8 +472,14 @@ TEST(DeltaArm, ArmAngleWindowBoundsTheBandButCannotBeatTheFold)
   float open_lo = 0.0f;
   float open_hi = 0.0f;
   ASSERT_TRUE(open.get_linkage_band(0, open_lo, open_hi));
-  EXPECT_GE(open_lo, -0.5f) << "gen0's linkage folds at ~0 deg, so no negative band exists";
-  EXPECT_NEAR(open_hi, floored_hi, 0.5f) << "the upper edge is set by the linkage, not the window";
+  EXPECT_LT(open_lo, -1.0f) << "gen0's transmission stays valid below 0 deg of arm angle";
+  EXPECT_NEAR(open_lo, -6.7f, 0.5f) << "the servo 0 deg stop bounds the new lower edge";
+  EXPECT_NEAR(open_hi, floored_hi, 0.5f) << "the upper edge is set by the servo stop, not the window";
+
+  float open_servo_lo = 0.0f;
+  float open_servo_hi = 0.0f;
+  ASSERT_TRUE(open.linkage_motor_span(0, open_servo_lo, open_servo_hi));
+  EXPECT_NEAR(open_servo_lo, 0.0f, 0.5f) << "the new lower edge IS the 0 deg servo stop";
 
   // Raising the floor, on the other hand, must narrow the band from below.
   std::vector<DeltaArm::ArmMechConfig> raised = limbs(&gen0Limb);
@@ -447,8 +493,10 @@ TEST(DeltaArm, ArmAngleWindowBoundsTheBandButCannotBeatTheFold)
   EXPECT_NEAR(tight_hi, floored_hi, 0.5f) << "raising the floor must not move the top edge";
 
   // And a pose that needs a shallower limb than the raised floor allows is
-  // then refused (on-axis, this pose needs ~5.6 deg of arm angle).
-  const DeltaArm::TargetResult shallow = tight.set_tar_pos(0.0f, 0.0f, -0.18f);
+  // then refused (on-axis, this pose needs ~8.7 deg of arm angle). One step
+  // deeper needs 10.7 deg and is accepted, so the floor really is what binds.
+  EXPECT_TRUE(tight.set_tar_pos(0.0f, 0.0f, -0.190f).reached);
+  const DeltaArm::TargetResult shallow = tight.set_tar_pos(0.0f, 0.0f, -0.185f);
   EXPECT_FALSE(shallow.reached);
   EXPECT_FALSE(shallow.reason.empty());
 }
@@ -640,4 +688,234 @@ TEST(DeltaArm, SetGeometryRejectsWrongLimbCount)
   EXPECT_THROW(arm.set_geometry({defaultLimb(0)}), std::invalid_argument);
   EXPECT_THROW(arm.set_geometry({defaultLimb(0), defaultLimb(1), defaultLimb(2), defaultLimb(0)}),
                std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Regression tests for the IK rewrite.
+// ---------------------------------------------------------------------------
+
+// Stage 1 is now transcribed step by step from Williams II, "The Delta Parallel
+// Robot: Kinematics Solutions" (the paper linked from arm/README.md), in the
+// paper's own A/B/C/D notation and with the half-angle substitution. That
+// transcription is algebraically the same solve the acos closed form below was
+// doing, so this test pins the two against each other: the rewrite must have
+// changed how the maths is written down and commented, NOT what the arm does.
+//
+// The oracle is a verbatim copy of the pre-rewrite routine, kept here precisely
+// because the production copy is gone.
+TEST(DeltaArm, StageOneMatchesTheLegacyClosedForm)
+{
+  // The pre-rewrite stage-1 solver, in the limb's own plane. (x0, y0) is the
+  // target already rotated onto this limb's radial.
+  auto legacy = [](float x0, float y0, float z0, float t, float pr, float rf, float re) {
+    const float Y = t + y0 - pr;
+    const float Z = z0;
+    const float rho_sq = Y * Y + Z * Z;
+    if (rho_sq < 1e-6f) return std::numeric_limits<float>::quiet_NaN();
+    const float M = (re * re - x0 * x0 - rf * rf - rho_sq) / (2.0f * rf * std::sqrt(rho_sq));
+    if (M < -1.0f || M > 1.0f) return std::numeric_limits<float>::quiet_NaN();
+    const float phi = std::atan2(Z, Y);
+    const float delta = std::acos(M);
+    float th0 = phi + delta;
+    const float th1 = phi - delta;
+    if (std::fabs(th1) < std::fabs(th0)) th0 = th1;
+    return th0;
+  };
+
+  DeltaArm::Arm arm(nullptr);
+  arm.set_geometry(limbs(&gen0Limb));
+  const DeltaArm::ArmMechConfig c = gen0Limb(0);
+
+  int compared = 0;
+  float worst = 0.0f;
+  for (float x = -0.10f; x <= 0.1001f; x += 0.02f) {
+    for (float y = -0.10f; y <= 0.1001f; y += 0.02f) {
+      for (float z = -0.34f; z <= -0.1599f; z += 0.01f) {
+        const DeltaArm::TargetResult r = arm.set_tar_pos(x, y, z);
+        if (!r.reached) continue;
+        arm.apply();
+        float motors[3] = {0.0f, 0.0f, 0.0f};
+        arm.get_motor_targets(motors);
+        // Undo stage 2 to recover the arm angle stage 1 chose for limb 0.
+        const float got = arm.arm_angle_from_motor_deg(motors[0], 0);
+
+        // What the old acos solve produced for the same target.
+        const float rx = x * 1000.0f * std::cos(c.plane_angle) + y * 1000.0f * std::sin(c.plane_angle);
+        const float ry = -x * 1000.0f * std::sin(c.plane_angle) + y * 1000.0f * std::cos(c.plane_angle);
+        const float want = legacy(rx, ry, z * 1000.0f, c.base_radius, c.platform_radius,
+                                  c.upper_arm_len, c.lower_arm_len);
+        if (std::isnan(want)) continue;
+
+        EXPECT_NEAR(got, want * kRadToDeg, 0.05f)
+            << "stage 1 diverged from the legacy solve at (" << x << ", " << y << ", " << z << ")";
+        worst = std::max(worst, std::fabs(got - want * kRadToDeg));
+        ++compared;
+      }
+    }
+  }
+  EXPECT_GT(compared, 500) << "the comparison grid barely exercised the solver";
+  // Float round-off only: the two forms are the same equation.
+  EXPECT_LT(worst, 0.02f) << "worst stage-1 divergence was " << worst << " deg";
+}
+
+// Stage 2 is now an exact circle-circle intersection instead of the old
+// atan2/acos closed form, which described no rigid linkage at all: sweeping the
+// arm in small steps and differencing its output gave crank increments drifting
+// from about +3 deg to -13 deg instead of staying at 0. This test re-derives the
+// horn pin independently and checks the three things that closed form could not
+// satisfy: both link lengths hold exactly, the motor angle is monotone, and the
+// library's own inverse returns the arm angle it started from.
+TEST(DeltaArm, FourBarSolveIsGeometricallyExact)
+{
+  // Independent circle-circle intersection: the horn pin is the point `a` from
+  // the servo shaft and `b` from the arm socket.
+  auto horn_pin_servo_deg = [](float theta_arm, const DeltaArm::ArmMechConfig & c,
+                               float * resid_a, float * resid_b) {
+    const float px = c.base_radius + c.arm_attach_dist * std::cos(theta_arm) -
+                     c.arm_attach_offset * std::sin(theta_arm);
+    const float py = -c.arm_attach_dist * std::sin(theta_arm) -
+                     c.arm_attach_offset * std::cos(theta_arm);
+    const float a = c.upper_rod_len;
+    const float b = c.servo_rod_len;
+    const float dx = px - c.servo_radius;
+    const float dy = py - c.servo_z;
+    const float d = std::hypot(dx, dy);
+    if (d > a + b + 1e-3f || d < std::fabs(a - b) - 1e-3f) {
+      return std::numeric_limits<float>::quiet_NaN();
+    }
+    const float along = (d * d + a * a - b * b) / (2.0f * d);
+    const float h = std::sqrt(std::max(0.0f, a * a - along * along));
+    const float fx = c.servo_radius + along * (dx / d);
+    const float fy = c.servo_z + along * (dy / d);
+    const float ex = fx + h * (dy / d);
+    const float ey = fy - h * (dx / d);
+    *resid_a = std::fabs(std::hypot(ex - c.servo_radius, ey - c.servo_z) - a);
+    *resid_b = std::fabs(std::hypot(ex - px, ey - py) - b);
+    float motor = std::atan2(c.servo_z - ey, ex - c.servo_radius) * kRadToDeg;
+    if (motor < 0.0f) motor += 360.0f;
+    return motor;
+  };
+
+  const DeltaArm::ArmMechConfig c = gen0Limb(0);
+  DeltaArm::Arm arm(nullptr);
+  arm.set_geometry(limbs(&gen0Limb));
+
+  float lo = 0.0f;
+  float hi = 0.0f;
+  ASSERT_TRUE(arm.get_linkage_band(0, lo, hi));
+
+  constexpr int kSteps = 400;
+  float prev_motor = -1.0f;
+  for (int i = 0; i <= kSteps; ++i) {
+    const float theta_deg = lo + (hi - lo) * static_cast<float>(i) / static_cast<float>(kSteps);
+    const float theta_rad = theta_deg * kDegToRad;
+
+    float resid_a = 0.0f;
+    float resid_b = 0.0f;
+    const float motor = horn_pin_servo_deg(theta_rad, c, &resid_a, &resid_b);
+    ASSERT_FALSE(std::isnan(motor)) << "band admits arm angle " << theta_deg
+                                     << " deg but the linkage cannot close there";
+
+    // Both links hold exactly: a rigid horn and a rigid rod, to float precision.
+    EXPECT_LT(resid_a, 1e-3f) << "horn length violated at arm angle " << theta_deg << " deg";
+    EXPECT_LT(resid_b, 1e-3f) << "rod length violated at arm angle " << theta_deg << " deg";
+
+    // Monotone, so the transmission has no fold inside the band and the
+    // bisection in arm_from_motor() is well posed.
+    EXPECT_GT(motor, prev_motor) << "motor angle stopped increasing at arm angle "
+                                  << theta_deg << " deg: the four-bar folds";
+    prev_motor = motor;
+
+    // The library must invert its own geometry: feeding the geometrically exact
+    // servo angle back must return the arm angle it came from. The old closed
+    // form failed this, which is how the arm silently drifted off target.
+    EXPECT_NEAR(arm.arm_angle_from_motor_deg(motor, 0), theta_deg, 0.05f)
+        << "4-bar inverse did not round trip at arm angle " << theta_deg << " deg";
+  }
+}
+
+TEST(DeltaArm, BypassNeverCommandsServoOutsideItsTravel)
+{
+  // bypass_reachability resolves an out-of-envelope target to the nearest arm
+  // angle at which the linkage merely CLOSES, ignoring the servo-travel term of
+  // the band. The matching motor angle then lands far outside the servo's
+  // travel (gen0 produced 230 deg for a deep goal and 356 deg for a shallow
+  // one), i.e. a servo angle the mechanism cannot hold. ik_stage2() must clamp
+  // the commanded angle to the travel so nothing unphysical is ever published.
+  std::vector<DeltaArm::ArmMechConfig> cfg = limbs(&gen0Limb);
+  for (auto& c : cfg) c.bypass_reachability = true;
+
+  DeltaArm::Arm arm(nullptr);
+  arm.set_geometry(cfg);
+
+  const DeltaArm::ArmMechConfig c = gen0Limb(0);
+  const float lo = c.motor_angle_min;
+  const float hi = c.motor_angle_max;
+
+  // Sweep well past both ends of the envelope: shallow goals hit the circle-miss
+  // tangent, deep goals hit the band edge, and both used to escape.
+  int checked = 0;
+  for (int zi = -10; zi >= -400; zi -= 5) {
+    const DeltaArm::TargetResult r = arm.set_tar_pos(0.0f, 0.0f, zi * 0.001f);
+    if (!r.reached) continue;
+    arm.apply();
+    float motors[3];
+    arm.get_motor_targets(motors);
+    for (int leg = 0; leg < 3; ++leg) {
+      ASSERT_GE(motors[leg], lo - 1e-3f)
+          << "bypass commanded leg " << leg << " " << motors[leg]
+          << " deg at z=" << zi << " mm, below the " << lo << " deg travel stop";
+      ASSERT_LE(motors[leg], hi + 1e-3f)
+          << "bypass commanded leg " << leg << " " << motors[leg]
+          << " deg at z=" << zi << " mm, past the " << hi << " deg travel stop";
+      // Inside the travel is not enough: the 4-bar must actually be able to
+      // resolve the angle, or forward kinematics would quietly re-clamp it.
+      // The closure span is inclusive at both ends (try_arm_from_motor_deg
+      // deliberately treats the endpoints as out of closure, so compare against
+      // the span directly).
+      float span_lo = 0.0f;
+      float span_hi = 0.0f;
+      ASSERT_TRUE(arm.linkage_motor_span(leg, span_lo, span_hi));
+      ASSERT_GE(motors[leg], span_lo - 1e-3f)
+          << "bypass commanded leg " << leg << " " << motors[leg]
+          << " deg at z=" << zi << " mm, below the closure span ["
+          << span_lo << ", " << span_hi << "]";
+      ASSERT_LE(motors[leg], span_hi + 1e-3f)
+          << "bypass commanded leg " << leg << " " << motors[leg]
+          << " deg at z=" << zi << " mm, past the closure span ["
+          << span_lo << ", " << span_hi << "]";
+    }
+    ++checked;
+  }
+
+  // The sweep must actually have exercised the bypass path, otherwise the
+  // assertions above are vacuous.
+  EXPECT_GT(checked, 40) << "sweep only accepted " << checked << " poses";
+
+  // And the two extremes that used to escape must now sit exactly on a stop.
+  // gen0's closure span [15.87, 144.89] sits strictly inside the [0, 145]
+  // travel, so bypassing past either end must pin to the SPAN edge, not the
+  // travel edge.
+  float span_lo = 0.0f;
+  float span_hi = 0.0f;
+  ASSERT_TRUE(arm.linkage_motor_span(0, span_lo, span_hi));
+  ASSERT_GT(span_lo, lo);
+  ASSERT_LT(span_hi, hi);
+
+  // A shallow out-of-envelope goal must land exactly ON one of the two span
+  // edges, i.e. the clamp engaged. Which edge is not pinned down: the folded raw
+  // angle jumps from ~15 deg to ~356 deg between neighbouring depths, so either
+  // saturation is a legitimate "nearest closing angle" outcome.
+  EXPECT_TRUE(arm.set_tar_pos(0.0f, 0.0f, -0.016f).reached);
+  arm.apply();
+  float m[3];
+  arm.get_motor_targets(m);
+  EXPECT_TRUE(std::fabs(m[0] - span_lo) < 1e-3f || std::fabs(m[0] - span_hi) < 1e-3f)
+      << "shallow goal commanded " << m[0] << " deg, which is not a span edge ["
+      << span_lo << ", " << span_hi << "]";
+
+  EXPECT_TRUE(arm.set_tar_pos(0.0f, 0.0f, -0.366f).reached);
+  arm.apply();
+  arm.get_motor_targets(m);
+  EXPECT_NEAR(m[0], span_hi, 1e-3f) << "deep goal should pin to the span's high edge";
 }

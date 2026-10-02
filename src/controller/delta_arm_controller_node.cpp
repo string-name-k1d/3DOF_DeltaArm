@@ -32,9 +32,9 @@ void DeltaArmControllerNode::declareParams() {
     const double lower_arm_len = declare_parameter<double>("geometry.lower_arm_len", 240.0);
 
     // 4-bar servo-linkage geometry (see ArmMechConfig): the servo drives the
-    // upper arm through a horn + rigid rod, mapped by the closed-form solve in
-    // ik_stage2. c = hypot(arm_attach_dist, arm_attach_offset); the ground link
-    // d runs servo -> shoulder.
+    // upper arm through a horn + rigid rod, mapped by the exact circle-circle
+    // solve in ik_stage2. c = hypot(arm_attach_dist, arm_attach_offset); the
+    // ground link d runs servo -> shoulder.
     const double servo_radius = declare_parameter<double>("geometry.servo_radius", 57.65);
     const double servo_z = declare_parameter<double>("geometry.servo_z", -22.5);
     const double upper_rod_len = declare_parameter<double>("geometry.upper_rod_len", 60.0);
@@ -55,6 +55,10 @@ void DeltaArmControllerNode::declareParams() {
         declare_parameter<std::vector<double>>("geometry.angle_max", std::vector<double>{145.0, 145.0, 145.0});
     const double arm_angle_min = declare_parameter<double>("geometry.arm_angle_min", 0.0);
     const double arm_angle_max = declare_parameter<double>("geometry.arm_angle_max", 180.0);
+    // Diagnostic escape hatch: when true the IK stops refusing out-of-envelope
+    // targets and resolves them to the nearest closeable arm angle. Default false
+    // keeps the reachability guard ON. See ArmMechConfig::bypass_reachability.
+    const bool bypass_reachability = declare_parameter<bool>("geometry.bypass_reachability", false);
     constexpr double kDegToRad = 0.017453292519943295;
 
     simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
@@ -112,10 +116,13 @@ void DeltaArmControllerNode::declareParams() {
             .arm_angle_max = static_cast<float>(arm_angle_max * kDegToRad),
             .plane_angle = static_cast<float>(leg * kTwoPiOver3),
             .home_offset = 0.0f,
+            .bypass_reachability = bypass_reachability,
         };
         configs.push_back(c);
     }
     arm_.set_geometry(configs);
+    RCLCPP_WARN(get_logger(), "geometry.bypass_reachability=%s (reachability guard is %s)", bypass_reachability ? "true" : "false",
+                bypass_reachability ? "DISABLED - out-of-envelope targets are clamped, not refused" : "ON");
 
     // Start the arm at a valid (IK-reachable) posture instead of the degenerate
     // (0,0,0). The commanded pose becomes the streamed pose in sim mode.

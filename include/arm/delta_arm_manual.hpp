@@ -21,7 +21,7 @@ namespace DeltaArmRos
  *  * Subscribes "arm/pos" and prints current-position changes.
  *  * Enables the get_pos stream on startup so position feedback is available.
  *
- * The actual WASD key decoding lives in the standalone main
+ * The actual key decoding lives in the standalone main
  * (delta_arm_manual_main.cpp); this class exposes the ROS plumbing.
  */
 class ManualControlNode : public rclcpp::Node

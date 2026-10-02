@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <vector>
 
 namespace DeltaArmDriverNode {
 
@@ -21,10 +22,29 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
     targets_topic_ = get_parameter("targets_topic").as_string();
     offline_streak_ = get_parameter("offline_streak").as_int();
     // Motor Configs
-    const auto angle_min = get_parameter("angle_min").as_double_array();
-    const auto angle_max = get_parameter("angle_max").as_double_array();
+    // The servo's travel limits live in the SHARED `geometry` block so the
+    // controller's IK can bound itself to the same envelope. This node's own
+    // angle_min/angle_max still override it when set; left empty (the default)
+    // they inherit the geometry values, so the limit is stated once.
+    const auto geom_min = get_parameter("geometry.angle_min").as_double_array();
+    const auto geom_max = get_parameter("geometry.angle_max").as_double_array();
+    const auto own_min = get_parameter("angle_min").as_double_array();
+    const auto own_max = get_parameter("angle_max").as_double_array();
+    const std::vector<double>& angle_min = own_min.empty() ? geom_min : own_min;
+    const std::vector<double>& angle_max = own_max.empty() ? geom_max : own_max;
     const auto start_angles = get_parameter("start_angles").as_double_array();
     const double max_speed = get_parameter("max_speed").as_double();
+
+    // Resolve the travel actually enforced, then publish it back onto the
+    // parameters so `ros2 param get` shows the effective limit rather than an
+    // empty inherited default, and say where it came from.
+    const auto resolved_min = angle_min.empty() ? std::vector<double>{0.0, 0.0, 0.0} : angle_min;
+    const auto resolved_max = angle_max.empty() ? std::vector<double>{145.0, 145.0, 145.0} : angle_max;
+    set_parameter(rclcpp::Parameter("angle_min", resolved_min));
+    set_parameter(rclcpp::Parameter("angle_max", resolved_max));
+    RCLCPP_INFO(get_logger(), "servo travel: min=[%.2f, %.2f, %.2f] max=[%.2f, %.2f, %.2f] deg (from %s)",
+                resolved_min[0], resolved_min[1], resolved_min[2], resolved_max[0], resolved_max[1],
+                resolved_max[2], own_min.empty() ? "geometry.angle_min/angle_max" : "this node's angle_min/angle_max");
 
     int ids[3] = {0, 0, 0};
     for (size_t i = 0; i < servo_ids.size() && i < 3; ++i)
@@ -120,8 +140,15 @@ void MotorDriverNode::declareParams() {
     // to physical servo angles and read-backs back to joint space.
     declare_parameter<std::vector<double>>("start_angles", {0.0, 0.0, 0.0});
     // Physical position limits (deg): 0 = fully extended, 145 = most retracted.
-    declare_parameter<std::vector<double>>("angle_min", {0.0, 0.0, 0.0});
-    declare_parameter<std::vector<double>>("angle_max", {145.0, 145.0, 145.0});
+    // Leave EMPTY to inherit the shared geometry.angle_min / geometry.angle_max,
+    // which is where the controller reads them from - keeping the limit in one
+    // place means the IK and the servo can never disagree about the envelope.
+    declare_parameter<std::vector<double>>("angle_min", std::vector<double>{});
+    declare_parameter<std::vector<double>>("angle_max", std::vector<double>{});
+    // Servo travel limits, shared with the controller. Set these, not the pair
+    // above, unless this node genuinely needs different hardware.
+    declare_parameter<std::vector<double>>("geometry.angle_min", {0.0, 0.0, 0.0});
+    declare_parameter<std::vector<double>>("geometry.angle_max", {145.0, 145.0, 145.0});
     // Velocity limit (deg/s) used for the on-servo trajectory profiling.
     declare_parameter<double>("max_speed", 100.0);
     declare_parameter<bool>("auto_init", true);

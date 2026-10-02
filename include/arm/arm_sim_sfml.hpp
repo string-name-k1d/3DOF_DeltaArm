@@ -2,11 +2,13 @@
 #define arm__ARM_SIM_SFML_HPP_
 
 #include <memory>
+#include <string>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
 
 #include "arm/action/set_position.hpp"
+#include "arm/delta_arm.hpp"
 #include "arm/msg/arm_feedback.hpp"
 #include "arm/msg/arm_position.hpp"
 #include "arm/srv/toggle_position_stream.hpp"
@@ -55,10 +57,63 @@ public:
   /// @brief Ask the controller for continuous "arm/pos" publishing.
   void enable_position_streaming();
 
+  // ── Kinematics (shared with the controller) ──────────────────────────────
+  //
+  // The motor -> arm angle conversion used for drawing is the SAME code the
+  // controller runs, not a second implementation. A private copy of the 4-bar
+  // solve silently disagreed with the controller's reachable band, which showed
+  // up as a limb whose arm angle froze at 90 deg while the motor angle tracked
+  // the target perfectly.
+  /// @brief Commanded motor angle (deg) -> upper-arm angle (deg) for a limb,
+  ///        clamped to that limb's reachable band. Never throws.
+  float arm_angle_deg(float motor_deg, int leg) const
+  {
+    return kin_.arm_angle_from_motor_deg(motor_deg, leg);
+  }
+
+  /// @brief Reachable arm-angle band of a limb in degrees; false when empty.
+  bool arm_band(int leg, float & lo_deg, float & hi_deg) const
+  {
+    return kin_.get_linkage_band(leg, lo_deg, hi_deg);
+  }
+
+  /// @brief Measured motor angle -> arm angle, reporting linkage closure
+  ///        failure instead of clamping. `arm_out` is only written on success;
+  ///        on failure the renderer keeps its last valid arm angle for the
+  ///        limb and flags the reading as out of closure.
+  bool try_arm_angle_deg(float motor_deg, int leg, float & arm_out) const
+  {
+    return kin_.try_arm_from_motor_deg(motor_deg, leg, arm_out);
+  }
+
+  /// @brief Motor angles (deg) bounding the linkage's closure range, resolved
+  ///        once per geometry. Used to tell which side a reading fell off.
+  bool arm_motor_span(int leg, float & motor_lo_deg, float & motor_hi_deg) const
+  {
+    return kin_.linkage_motor_span(leg, motor_lo_deg, motor_hi_deg);
+  }
+
+  /// @brief Resolve the task-space pose through the shared IK so the renderer
+  ///        can be seeded with a valid posture before the first arm/pos message.
+  ///        Returns false (with `reason` set) when the pose is unreachable.
+  bool seed_pose(double x, double y, double z, float motor_out[3], std::string & reason);
+
+  /// @brief Populated when the controller rejects a set_pos goal, so the view
+  ///        can explain a target that was accepted by the keys but not by the
+  ///        arm. Cleared on the next accepted goal.
+  const std::string & last_rejection() const { return last_rejection_; }
+  bool goal_rejected() const { return !last_rejection_.empty(); }
+
   /// Latest end-effector position (m) from the controller stream.
   double pos_x_ = 0.0;
   double pos_y_ = 0.0;
   double pos_z_ = 0.0;
+
+  /// Latest commanded target position (m) from the controller stream
+  /// (arm/pos.target_position) - drawn as the "control target" marker.
+  double tar_x_ = 0.0;
+  double tar_y_ = 0.0;
+  double tar_z_ = 0.0;
 
   /// Latest motor angles (degrees) from the controller stream.
   float ang_[3] = {0.0f, 0.0f, 0.0f};
@@ -121,11 +176,20 @@ public:
 private:
   void onPosition(const arm::msg::ArmPosition::SharedPtr msg);
   void onFeedback(const arm::msg::ArmFeedback::SharedPtr msg);
+  /// @brief Read the shared geometry.* parameters and configure the kinematics
+  ///        reference (same parameters the controller reads).
+  void configureKinematics();
 
   rclcpp_action::Client<SetPosition>::SharedPtr action_client_;
   rclcpp::Subscription<arm::msg::ArmPosition>::SharedPtr pos_sub_;
   rclcpp::Subscription<arm::msg::ArmFeedback>::SharedPtr fb_sub_;
   rclcpp::Client<arm::srv::TogglePositionStream>::SharedPtr toggle_client_;
+
+  /// Kinematics reference used only to convert motor -> arm angles for drawing
+  /// and to seed the initial posture. Holds no motion state of its own.
+  DeltaArm::Arm kin_;
+
+  std::string last_rejection_;
 
   bool streaming_ = false;
   rclcpp::Time fb_last_;

@@ -1,9 +1,11 @@
 # ============================================================================
-# My Arm configuration.
+# Gen-0 delta-arm configuration (alternate geometry set).
 #
-# Loaded by the arm_controller / arm_system nodes:
-#   ros2 run arm arm_system --ros-args --params-file config/arm_params.yaml
-# (the launch files point at this file automatically).
+# Same structure as arm_params.yaml; only the mechanism geometry differs. Select
+# it at launch time instead of the default set, e.g.:
+#   ros2 launch arm arm_sim_2d.launch.py params_file:=$(ros2 pkg prefix arm)/share/arm/config/arm_gen0_params.yaml
+# or, via the host launcher:
+#   ./scripts/run_arm.sh --params gen0
 # ============================================================================
 
 arm_controller:
@@ -39,7 +41,8 @@ arm_controller:
     control:
       # home_pos: the safe home posture (metres) the arm returns to after an
       #   emergency-stop release. Must be IK-reachable, like sim.initial_pos.
-      home_pos: [0.0, 0.0, -0.30]
+      #   Gen-0 linkage (a=35/b=60, attach=52) only closes near z=-0.33.
+      home_pos: [0.0, 0.0, -0.33]
 
 # ============================================================================
 # Terminal end-effector node (skeleton). Owns the swappable EndpointModule and
@@ -100,14 +103,12 @@ arm_endpoint:
       #   joints). The servos mount UNDER the base plate (so servo_z < 0 puts
       #   the whole linkage below it), closer to the platform centre than the
       #   arm shoulders at base_radius.
-      servo_radius: 57.65
+      servo_radius: 60.0
       # servo_z: height (mm) of the servo output shafts below the pivot plane.
       servo_z: -22.5
-      # upper_rod_len: length (mm) of the SERVO HORN (the motor crank fixed to
-      #   the servo shaft; 4-bar link `a`). NOTE: the two param sets deliberately
-      #   use opposite horn/rod proportions (this file 60/35, arm_gen0 35/60) for
-      #   two different physical assemblies. Do not "fix" one to match the other.
-      upper_rod_len: 60.0
+      # upper_rod_len: length (mm) of the SERVO HORN (the short motor crank
+      #   fixed to the servo shaft; 4-bar link `a`).
+      upper_rod_len: 35.0
       # servo_rod_len: length (mm) of the RIGID connecting rod between the
       #   crank pin and the arm attach bracket (4-bar link `b`). The stage-2 IK
       #   solves the 4-bar closed form so the motor angle is a NON-linear map
@@ -118,47 +119,21 @@ arm_endpoint:
       #     C = c^2 - a^2 - b^2 - d^2 + 2 a b cos(theta_b)
       #     motor = 2*pi - atan2(B,A) - acos(C/|(A,B)|)   (+ home offset, deg)
       #   with c = the shoulder->socket link and d = the servo->shoulder ground
-      #   link (both derived below).
-      servo_rod_len: 35.0
+      #   link (both derived below). The linkage closes only for arm angles
+      #   above ~33 deg (flat poses are physically unreachable through it).
+      servo_rod_len: 60.0
       # arm_attach_dist: fixed distance (mm) from the arm's base joint to the
       #   lower-rod attach bracket, measured ALONG the arm. Together with
       #   arm_attach_offset it defines the shoulder->socket link c =
       #   hypot(arm_attach_dist, arm_attach_offset).
-      arm_attach_dist: 68.5
+      arm_attach_dist: 52.0
       # arm_attach_offset: PERPENDICULAR standoff (mm) of the rod's arm-side
       #   ball socket from the arm axis (the real bracket gap between the rod
       #   endpoint and the arm).
       arm_attach_offset: 20.5
       # rod_spread: lateral separation (mm) of the two parallel bars of each
-      #   lower arm (visual only).
+      #   lower arm (elbow -> platform), visual only.
       rod_spread: 8.0
-
-      # ── Travel limits ────────────────────────────────────────────────────
-      # These bound the arm's reachable envelope. The controller derives that
-      # envelope ONCE at startup from the geometry above plus the limits here,
-      # and both directions of the kinematics then agree on it: the IK refuses
-      # anything outside it and the forward estimate clamps to it. The
-      # resolved band is logged at startup ("reachable arm band, leg N").
-      #
-      # angle_min / angle_max: the servo's own mechanical travel (deg, per
-      #   motor). This is the same pair the motor driver clamps against, which
-      #   is why it lives here in the SHARED geometry block: a pose is never
-      #   commanded that the servo could not physically hold. For this
-      #   geometry the upper limit is what stops the arm sweeping past ~99.6
-      #   deg even though the linkage itself closes to ~127 deg - measure the
-      #   real servo and raise it to gain workspace (roughly 3.4 deg of arm per
-      #   5 deg of servo travel).
-      angle_min: [0.0, 0.0, 0.0]
-      angle_max: [145.0, 145.0, 145.0]
-      # arm_angle_min / arm_angle_max: an additional practical bound on the
-      #   UPPER-ARM angle itself (deg; 0 = limb straight out, growing = arm
-      #   sweeping downward). A negative arm angle is mechanically possible on
-      #   some assemblies but rarely useful, so it is excluded by default; set
-      #   arm_angle_min below 0 to re-enable it. The linkage's own closure
-      #   region is always intersected with this window, so these only ever
-      #   narrow the envelope.
-      arm_angle_min: 0.0
-      arm_angle_max: 180.0
 
       # motor_positions / platform_offsets: optional explicit joint positions
       #   in the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2].
@@ -172,12 +147,13 @@ arm_endpoint:
 
     # Initial-pose / simulation behaviour (shared by controller + visualiser).
     sim:
-      # initial_pos: the arm's start posture (metres). Must be inside the
-      #   reachable envelope (see the travel limits above) - the controller
-      #   commands it on startup and logs an ERROR if it is not, so the arm
-      #   never begins at the degenerate (0,0,0) or in an unreachable pose. The
-      #   visualiser seeds its drawn pose from the same IK.
-      initial_pos: [0.0, 0.0, -0.28]
+      # initial_pos: the arm's start posture (metres). Must be IK-reachable
+      #   (the controller commands it on startup, so the arm never begins at
+      #   the degenerate (0,0,0)) AND - with the 4-bar linkage - each limb must
+      #   be able to close, i.e. the pose must sit inside the working envelope
+      #   (arm angles above ~33 deg, all limbs). The visualiser seeds its drawn
+      #   pose from the IK of this point too.
+      initial_pos: [0.0, 0.0, -0.33]
       # simulate_arrival: in sim mode the controller promotes each set_pos goal
       #   to the current pose immediately (no motor driver in the loop).
       simulate_arrival: true
@@ -195,15 +171,12 @@ arm_motor_driver:
     #   angle when the joint sits at the arm's zero/home pose. A commanded
     #   joint angle is sent as joint + start_angles.
     start_angles: [0.0, 0.0, 0.0]
-    # angle_min / angle_max: leave these OUT (or empty) to inherit the shared
-    #   geometry.angle_min / geometry.angle_max, which is where the controller
-    #   reads them from. Setting them here only makes sense for hardware whose
-    #   travel differs from the modelled geometry.
-    #
     # angle_min: lower physical position limit (deg) per motor. Control outputs
     #   are clamped into [angle_min, angle_max] before reaching the servo.
+    angle_min: [0.0, 0.0, 0.0]
     # angle_max: upper physical position limit (deg) per motor. 0 = limb fully
     #   extended (away from the centre), 145 = most retracted.
+    angle_max: [145.0, 145.0, 145.0]
     # max_speed: velocity limit (deg/s) used by the servo's trajectory
     #   profiling when it interpolates current -> commanded angle.
     max_speed: 100.0
@@ -226,6 +199,10 @@ arm_motor_driver:
 
 arm_manual_control:
   ros__parameters:
-    # step: manual-control step size (m) applied per key press.
-    #   W/S drive target y, A/D drive x, Z/X drive z.
+    # step: manual-control step size (m) applied per key press on the driven
+    #   axis.
     step: 0.01
+    # axis0: component of the target position the first key pair drives ("z").
+    axis0: "z"
+    # axis1: component of the target position the second key pair drives ("y").
+    axis1: "y"

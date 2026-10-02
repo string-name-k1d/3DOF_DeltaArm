@@ -32,10 +32,9 @@ There are three independent pieces:
 - **Range fold:** the raw 4-bar root is folded with `motor = 2π − raw` so the
   motor angle is **monotone increasing** across the band and lands inside
   `[0, 2π)` (driver nominal range is `[0°, 145°]`).
-- Unreachable input (either stage) **throws** `std::invalid_argument`; the
-  caller (`set_tar_pos` / controller action server) catches it and **keeps the
-  previous targets**. This is why a flat/out-of-band goal leaves `cur_pos` and
-  the motors untouched.
+- An out-of-band arm angle is **not** an error inside `motor_from_arm` — the
+  stage-2 caller checks it against the resolved band (§3.1a, §6) and reports the
+  goal as unreachable, leaving the previous targets committed.
 
 ---
 
@@ -124,14 +123,34 @@ The rod physically spans from horn joint to socket only if
 > `|a−b| = 25`, `a+b = 95`. At `θ = 0` the socket is ~110.9 mm from the servo —
 > the arm CANNOT be held horizontal even though the algebraic solve below still
 > returns a root (`u ≈ −0.68` is a legal `acos` argument). The band starts at
-> the θ where `|P−O| = a+b`:
+> the θ where `|P−O| = a+b`.
+
+### 3.1a The resolved band (not a hard-coded constant)
+
+The usable range is **not** a fixed `31.76°..90°`. It is derived once per
+`set_geometry()` by `Arm::compute_linkage_bands()` as the intersection of:
+
+1. **closure** — `four_bar_motor_angle()` is real (§3.1);
+2. **monotonicity** — `motor_from_arm` must be non-decreasing in θ. Past the
+   transmission-angle *fold* the map doubles back on itself and no single-valued
+   inverse exists, so that region is unusable. The scan therefore takes the
+   **longest strictly monotone sub-interval** of the closure run (this is what
+   bounds the default assembly from below and gen0's lower edge);
+3. **servo travel** — the commanded motor angle (after `home_offset`) must lie in
+   `geometry.angle_min .. geometry.angle_max`;
+4. **arm-angle window** — `geometry.arm_angle_min .. geometry.arm_angle_max`
+   (default `0 .. 180°`).
 
 ```
-band_low ≈ 31.76°        (found by bisection in arm_from_motor)
-band_high = 90°
+default : [31.81°, 99.69°]   upper edge set by the 145° servo stop
+gen0    : [ 0.05°, 101.13°]  upper edge set by the linkage
 ```
 
-Out-of-band arm angles **throw** — this is what rejects flat targets.
+Relaxing the default servo stop to 200° opens the band to ~127°, i.e. **~3.4° of
+arm per 5° of servo travel**. The arm does *not* stop at 90°; the servo does.
+
+The band is logged at startup per leg and is the single authority for both
+directions of the solve — see §6.
 
 ### 3.2 Closed-form solve
 
@@ -174,18 +193,21 @@ motor_rad = 2π − θa⁺
 
 ## 4. Inverse 4-bar (`arm_from_motor`, used by FK)
 
-Because `motor_from_arm` is monotone increasing across
-`[band_low, 90°]`, the inverse is a simple 60-iteration **bisection** on θ that
-re-evaluates the closed form — never an algebraic inversion (the analytically
-swapped form fails to replicate the `+` branch on part of `[85°, 128°]`-type
-regions). Motor angles *outside* the band are clamped to the band edges.
+`motor_from_arm` is monotone increasing across the **resolved band** (§3.1a), so
+the inverse is a simple 60-iteration **bisection** on θ that re-evaluates the
+closed form — never an algebraic inversion (the analytically swapped form fails
+to replicate the `+` branch on part of `[85°, 128°]`-type regions).
 
 ```
-θ = bisection over [band_low, 90°] of  motor_from_arm(θ) == motor_rad
+θ = bisection over the resolved band [band_lo, band_hi] of  motor_from_arm(θ) == motor_rad
 ```
 
-Never throws; used by `Arm::forward_kinematics()` to convert the servo angles
-back into arm angles before the delta FK.
+Motor angles outside the band are **clamped to the band edges**, so the function
+is total: feedback from a servo that is not currently inside the resolved
+envelope can never throw on the control path. This is what
+`Arm::forward_kinematics()` uses to convert servo angles back into arm angles
+before the delta FK, and it is why the drawn/streamed pose always agrees with a
+goal the IK accepted.
 
 ---
 
@@ -205,14 +227,27 @@ Result: `cur_pos`/`cur_angles` used by `apply()`/`get_pos` and the live
 
 ---
 
-## 6. Error / clamping policy (behavioural contract)
+## 6. Reachability contract
 
-- `ik_stage1` unreachable → throw (controller keeps previous targets).
-- `motor_from_arm` outside `[|a−b|, a+b]` (geometric) or `|C/R| > 1`
-  (algebraic) → throw → previous targets retained. Verified: goal
-  `(0,0,−0.15)` (flat, below band) is **accepted then retained** at
-  `cur z = −0.3000`, motors stay 94.29°.
-- `arm_from_motor` → never throws; clamps to band edges.
+`set_tar_pos()` returns `TargetResult{bool reached, std::string reason}` and is
+**atomic**: on failure it commits no motor targets and does not advance the
+commanded pose, so the arm holds position and the streamed target marker stays
+where the arm actually is. Callers that only care about success may ignore it.
+
+| condition | outcome |
+|---|---|
+| `ik_stage1` unreachable (no sphere intersection) | `reached = false`, reason `Unreachable delta target (circle miss)` |
+| limb arm angle outside the resolved band (§3.1a) | `reached = false`, reason names the leg, the angle it needed and the band |
+| any limb above the servo's travel | folded into the previous case — the band already accounts for it |
+| stage 2 solves for all three limbs | `reached = true`, all three motor targets committed together |
+
+The action server (`arm/set_pos`) maps this to `ABORTED` with the same reason and
+the 2-D visualiser shows `TARGET REJECTED`, so a refused goal is visible rather
+than looking like a dead motor.
+
+`arm_from_motor` and `arm_angle_from_motor_deg` never throw and never leave the
+band — they clamp to its edges. They are the *forward* direction and must be
+total, because they run on feedback from real hardware.
 
 ---
 
@@ -222,12 +257,18 @@ The geometry/constants above are duplicated (by design, verified equal) in:
 
 - `src/axis/delta-arm.cpp` — `Arm::init_default_geometry()`;
 - `src/controller/delta_arm_controller_node.cpp` — `declareParams()`;
-- `src/sim/arm_sim_sfml_main.cpp` — SFML 2-D visualizer;
 - `config/arm_params.yaml`;
 - `gazebo/src/arm_cmd_bridge.cpp` — Gazebo 3-D cmd bridge.
 
-Change them together (a single `RMS`-verified unit test target covers the
-outputs: `test/test_delta_arm.cpp` — 6/6 pass, run the binary directly,
+The 2-D visualiser is deliberately **not** on this list: `ArmSimSFMLNode` owns a
+`DeltaArm::Arm` and drives its poses through the shared `set_tar_pos()` /
+`arm_angle_from_motor_deg()` / `get_linkage_band()`, so it can no longer disagree
+with the controller about what is reachable. It still keeps its own 2-D drawing
+helpers (`fkFromAngles`, the four-bar crank-pin position) because those describe
+the picture, not the solution.
+
+Change the rest together (a single `RMS`-verified unit test target covers the
+outputs: `test/test_delta_arm.cpp` — 18/18 pass, run the binary directly,
 `ctest` is broken in-container). Reference tests:
 
 | Motor (deg) | expected arm (deg) |

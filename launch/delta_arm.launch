@@ -45,16 +45,19 @@
   </group>
 
   <!-- Feedback-only hardware (motion disabled): run the two nodes separately
-       so each can receive enable_motion=false via the param override. -->
+       so each loads arm_feedback_only.yaml, which must be a node-specific
+       params file. An inline <param name="enable_motion" value="false"/> is a
+       "/**:" wildcard and LOSES to the arm_motor_driver/arm_controller blocks
+       in params_file, leaving motion silently enabled. -->
   <group unless="$(var motion)">
     <group unless="$(var simulation)">
       <node pkg="arm" exec="arm_controller" name="arm_controller" output="screen">
         <param from="$(var params_file)"/>
-        <param name="enable_motion" value="false"/>
+        <param from="$(find arm)/config/arm_feedback_only.yaml"/>
       </node>
       <node pkg="arm" exec="arm_motor_driver" name="arm_motor_driver" output="screen">
         <param from="$(var params_file)"/>
-        <param name="enable_motion" value="false"/>
+        <param from="$(find arm)/config/arm_feedback_only.yaml"/>
       </node>
       <node pkg="arm" exec="arm_endpoint" name="arm_endpoint" output="screen"
             if="$(var endpoint)">

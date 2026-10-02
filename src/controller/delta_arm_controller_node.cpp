@@ -43,6 +43,20 @@ void DeltaArmControllerNode::declareParams() {
     const double arm_attach_offset = declare_parameter<double>("geometry.arm_attach_offset", 20.5);
     declare_parameter<double>("geometry.rod_spread", 8.0);
 
+    // Travel limits. The servo's own mechanical travel (angle_min/angle_max, in
+    // degrees) is the same pair the motor driver clamps against; it bounds the
+    // IK so a pose is never commanded that the servo could not hold. The
+    // arm-angle window is an additional practical bound on the limb itself: a
+    // negative arm angle is mechanically possible on some assemblies but rarely
+    // useful, so it is excluded by default and can be re-enabled by setting
+    // geometry.arm_angle_min below zero.
+    const auto angle_min = declare_parameter<std::vector<double>>("geometry.angle_min", std::vector<double>{0.0, 0.0, 0.0});
+    const auto angle_max =
+        declare_parameter<std::vector<double>>("geometry.angle_max", std::vector<double>{145.0, 145.0, 145.0});
+    const double arm_angle_min = declare_parameter<double>("geometry.arm_angle_min", 0.0);
+    const double arm_angle_max = declare_parameter<double>("geometry.arm_angle_max", 180.0);
+    constexpr double kDegToRad = 0.017453292519943295;
+
     simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
     enable_motion_ = declare_parameter<bool>("enable_motion", true);
     const auto initial =
@@ -78,6 +92,9 @@ void DeltaArmControllerNode::declareParams() {
     std::vector<DeltaArm::ArmMechConfig> configs;
     constexpr double kTwoPiOver3 = 2.0943951023931953; // 120 deg
     for (int leg = 0; leg < 3; ++leg) {
+        // The limits are per-limb in the config; the parameter arrays are
+        // shorter-tolerant than the YAML suggests, so fall back per index.
+        const size_t idx = static_cast<size_t>(leg);
         DeltaArm::ArmMechConfig c{
             .base_radius = static_cast<float>(base_radius),
             .platform_radius = static_cast<float>(platform_radius),
@@ -89,6 +106,10 @@ void DeltaArmControllerNode::declareParams() {
             .servo_rod_len = static_cast<float>(servo_rod_len),
             .arm_attach_dist = static_cast<float>(arm_attach_dist),
             .arm_attach_offset = static_cast<float>(arm_attach_offset),
+            .motor_angle_min = static_cast<float>(idx < angle_min.size() ? angle_min[idx] : 0.0),
+            .motor_angle_max = static_cast<float>(idx < angle_max.size() ? angle_max[idx] : 145.0),
+            .arm_angle_min = static_cast<float>(arm_angle_min * kDegToRad),
+            .arm_angle_max = static_cast<float>(arm_angle_max * kDegToRad),
             .plane_angle = static_cast<float>(leg * kTwoPiOver3),
             .home_offset = 0.0f,
         };
@@ -102,15 +123,21 @@ void DeltaArmControllerNode::declareParams() {
         const float ix = static_cast<float>(initial[0]);
         const float iy = static_cast<float>(initial[1]);
         const float iz = static_cast<float>(initial[2]);
-        arm_.set_tar_pos(ix, iy, iz);
+        const DeltaArm::TargetResult init = arm_.set_tar_pos(ix, iy, iz);
 
-        if (simulate_arrival_)
+        if (simulate_arrival_ && init.reached)
             arm_.apply();
 
         float init_deg[3] = {0.0f, 0.0f, 0.0f};
         arm_.get_motor_current(init_deg);
-        RCLCPP_INFO(get_logger(), "initial pose -> (%.3f, %.3f, %.3f) m, motors %.2f / %.2f / %.2f deg", ix, iy, iz,
-                    init_deg[0], init_deg[1], init_deg[2]);
+        if (init.reached) {
+            RCLCPP_INFO(get_logger(), "initial pose -> (%.3f, %.3f, %.3f) m, motors %.2f / %.2f / %.2f deg", ix, iy, iz,
+                        init_deg[0], init_deg[1], init_deg[2]);
+        } else {
+            RCLCPP_ERROR(get_logger(), "initial pose (%.3f, %.3f, %.3f) m is UNREACHABLE: %s - the arm stays at its "
+                                       "start angles. Fix sim.initial_pos or the geometry.",
+                         ix, iy, iz, init.reason.c_str());
+        }
     }
 
     RCLCPP_INFO(get_logger(),
@@ -121,6 +148,23 @@ void DeltaArmControllerNode::declareParams() {
                 "linkage: servo(r=%.1f z=%.1f) horn=%.1f rod=%.1f "
                 "attach=%.1f offset=%.1f",
                 servo_radius, servo_z, upper_rod_len, servo_rod_len, arm_attach_dist, arm_attach_offset);
+
+    // Report the resolved reachable arm-angle band: it is derived, so a
+    // surprising workspace is far easier to diagnose from the log than by
+    // probing the arm.
+    for (int leg = 0; leg < 3; ++leg) {
+        float lo_deg = 0.0f;
+        float hi_deg = 0.0f;
+        if (arm_.get_linkage_band(leg, lo_deg, hi_deg)) {
+            RCLCPP_INFO(get_logger(), "reachable arm band, leg %d: [%.2f, %.2f] deg (servo travel [%.1f, %.1f] deg)", leg,
+                        lo_deg, hi_deg, angle_min.empty() ? 0.0 : angle_min.front(),
+                        angle_max.empty() ? 145.0 : angle_max.front());
+        } else {
+            RCLCPP_WARN(get_logger(), "reachable arm band, leg %d: EMPTY - the 4-bar cannot close within the servo's "
+                                     "travel. Every pose will be rejected.",
+                        leg);
+        }
+    }
 }
 
 void DeltaArmControllerNode::setupActionServer() {
@@ -236,7 +280,21 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
 
     // Stage the task-space target and run the (two-stage) IK. The result is
     // published to the driver on arm/motor_targets.
-    arm_.set_tar_pos(x, y, z);
+    const DeltaArm::TargetResult reach = arm_.set_tar_pos(x, y, z);
+    if (!reach.reached) {
+        // Reporting success here used to make an unreachable goal look exactly
+        // like a dead motor: the arm simply did not move. Abort instead, and
+        // name the target so the caller can see WHICH pose was refused.
+        RCLCPP_WARN(get_logger(), "set_pos REJECTED (%.3f, %.3f, %.3f) m: %s", x, y, z, reach.reason.c_str());
+        auto result = std::make_shared<SetPosition::Result>();
+        result->succeeded = false;
+        result->message = std::string("target outside the reachable envelope: ") + reach.reason;
+        goal_handle->abort(result);
+
+        if (current_goal_handle_ == goal_handle)
+            current_goal_handle_.reset();
+        return;
+    }
 
     float angles[3] = {0.0f, 0.0f, 0.0f};
     arm_.get_motor_targets(angles);
@@ -318,6 +376,12 @@ void DeltaArmControllerNode::publishPosition() {
     msg->position.x = cur.x;
     msg->position.y = cur.y;
     msg->position.z = cur.z;
+
+    // Commanded target (control intent) so visualisers can mark it directly.
+    const DeltaArm::Vec3 tar = arm_.get_tar_pos();
+    msg->target_position.x = tar.x;
+    msg->target_position.y = tar.y;
+    msg->target_position.z = tar.z;
 
     float cur_angles[3] = {0.0f, 0.0f, 0.0f};
     float tar_angles[3] = {0.0f, 0.0f, 0.0f};

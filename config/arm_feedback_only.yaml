@@ -1,0 +1,21 @@
+# Feedback-only (no motor control) override.
+#
+# Passed AFTER the main arm params file by the launch files so it wins:
+#   ros2 launch arm arm_sim_2d.launch.py motor:=true control:=false
+#
+# This must be a node-specific ("arm_motor_driver:") block rather than an
+# inline launch dict. rcl gives an exact node-name block in a params file
+# precedence over a "/**:" wildcard override, so parameters=[params_file,
+# {'enable_motion': False}] silently leaves enable_motion=true and the driver
+# still subscribes to arm/motor_targets.
+#
+# enable_motion: false -> the arm/motor_targets subscription is never started,
+# so no MotorTargets message can ever reach the servos. Feedback, telemetry and
+# the arm/motor_param_query service stay live so the arm can still be observed.
+arm_motor_driver:
+  ros__parameters:
+    enable_motion: false
+
+arm_controller:
+  ros__parameters:
+    enable_motion: false

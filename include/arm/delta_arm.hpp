@@ -2,6 +2,7 @@
 #define arm__DELTA_ARM_HPP_
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace DeltaArm
@@ -60,6 +61,26 @@ struct ArmMechConfig
   float arm_attach_offset = 20.5f; // perpendicular standoff of the rod's
                                    // arm-side ball socket from the arm axis (mm)
 
+  // Travel limits. The reachable arm-angle band of a limb is NOT a property of
+  // the four-bar alone: it is the intersection of (a) the arm angles at which
+  // the linkage can physically close, (b) the arm angles whose motor angle is
+  // monotone (the four-bar folds at a transmission-angle singularity), (c) the
+  // servo's own mechanical travel, and (d) `arm_angle_min`/`arm_angle_max`.
+  // Arm::set_geometry() resolves all four once; the IK and the forward
+  // kinematics then share the resulting band. See Arm::get_linkage_band().
+  //
+  // `motor_angle_min`/`motor_angle_max` mirror the motor driver's
+  // angle_min/angle_max: the servo's physical position limits in DEGREES, as
+  // they appear on the wire after the home offset is added.
+  float motor_angle_min = 0.0f;    // (deg) servo lower travel limit
+  float motor_angle_max = 145.0f;  // (deg) servo upper travel limit
+  // Practical bounds on the arm angle itself (RADIANS, 0 = limb straight out,
+  // growing = sweeping downward). Negative arm angles are mechanically possible
+  // on some assemblies but rarely useful, so the lower bound defaults to 0.
+  // Set `arm_angle_min` negative to re-enable them.
+  float arm_angle_min = 0.0f;
+  float arm_angle_max = 3.14159265358979323846f;
+
   float plane_angle = 0.0f;      // angle (radians) of this limb's vertical
                                  // plane around the base's central axis
   float home_offset = 0.0f;      // motor home/calibration offset (radians)
@@ -88,6 +109,20 @@ public:
 };
 
 /**
+ * @brief Outcome of a task-space target request.
+ *
+ * A target outside the arm's reachable envelope is a normal, expected outcome
+ * (the envelope is small compared to free space), so it is reported rather
+ * than thrown. Callers should surface `reason` instead of silently ignoring the
+ * request, otherwise a rejected goal is indistinguishable from a dead motor.
+ */
+struct TargetResult
+{
+  bool reached = true;      ///< false when the target was rejected
+  std::string reason;       ///< why it was rejected; empty when `reached`
+};
+
+/**
  * @brief 3-DOF Delta arm - kinematics + state bookkeeping only.
  *
  * End-effector motion is produced with a two-stage inverse kinematics:
@@ -105,16 +140,46 @@ public:
 
   /// @brief Set the per-limb mechanism geometry (3 configs, one per leg).
   ///        If not called, a default concentric 3-leg configuration is used.
+  ///        Recomputes the reachable arm-angle band of every limb.
   void set_geometry(const std::vector<ArmMechConfig> & configs);
 
-  /// @brief Task-space interface (x, y, z in meters).
-  void set_tar_pos(float x, float y, float z);
+  /// @brief Task-space interface (x, y, z in meters). Returns whether the
+  ///        target was inside the reachable envelope. On rejection the previous
+  ///        motor targets are left intact.
+  TargetResult set_tar_pos(float x, float y, float z);
   Vec3 get_tar_pos() const;      ///< last commanded target
   Vec3 get_cur_pos() const;      ///< estimated end-effector pose (from forward estimate)
 
   /// @brief Motor-space outputs (degrees).
   void get_motor_current(float out[3]) const;
   void get_motor_targets(float out[3]) const;
+
+  /// @brief Commanded motor angle (degrees) -> upper-arm angle (degrees),
+  ///        clamped to the limb's reachable band. This is the same conversion
+  ///        the forward estimate uses, so the visualiser and the controller can
+  ///        never disagree about a limb's arm angle. Never throws.
+  float arm_angle_from_motor_deg(float motor_deg, int leg) const;
+
+  /// @brief Reachable upper-arm angle band of a limb, in degrees, using the
+  ///        arm convention (0 = limb straight out, growing = sweeping down).
+  ///        Returns false when the geometry admits no reachable arm angle.
+  bool get_linkage_band(int leg, float & lo_deg, float & hi_deg) const;
+
+  /// @brief Motor-space -> arm-space WITHOUT clamping. Unlike
+  ///        arm_angle_from_motor_deg() this reports motor angles the 4-bar
+  ///        cannot close instead of silently pinning them to a band edge, so
+  ///        the renderer can tell "the linkage is at its limit" apart from
+  ///        "the linkage is at that angle". Returns false and leaves
+  ///        `arm_out` untouched when `motor_deg` lies outside the closure
+  ///        range of the modelled linkage. Never throws.
+  bool try_arm_from_motor_deg(float motor_deg, int leg, float & arm_out) const;
+
+  /// @brief Motor angle (deg) at which the 4-bar reaches each end of the
+  ///        closure range, in the order that matches the band. Both are
+  ///        monotone in the arm angle, so the renderer can tell which side a
+  ///        reading fell off and extrapolate from the right edge. False when
+  ///        the band itself is empty.
+  bool linkage_motor_span(int leg, float & motor_lo_deg, float & motor_hi_deg) const;
 
   /// @brief Emergency halt: cancel pending motion, zero all motor targets.
   void stop();
@@ -126,9 +191,13 @@ public:
   /// @brief Whether the forward estimate (cur_pos_) tracks the target.
   static constexpr float kReachableTolerance = 1e-3f;
 
- private:
+private:
   /// @brief Build the default 3-leg concentric geometry.
   void init_default_geometry();
+
+  /// @brief Resolve the reachable arm-angle band of every limb from the
+  ///        current geometry. Called by set_geometry() and init_default_geometry().
+  void compute_linkage_bands();
 
   /// @brief Two-stage inverse kinematics.
   void ik_stage1(const Vec3 & target);      ///< task-space -> limb plane orientations
@@ -138,16 +207,16 @@ public:
   ///        closed form (a=horn, b=rod, c=shoulder->socket, d=servo->shoulder).
   ///        Throws std::invalid_argument when the linkage cannot close.
   float motor_from_arm(float theta_arm, int leg) const;
+  /// @brief Same solve, but assumes the arm angle is already known to close
+  ///        (the band edges are). Used to probe the band without throwing, so
+  ///        nothing inside the forward estimate can propagate an exception.
+  float motor_from_arm_unchecked(float theta_arm, int leg) const;
   /// @brief Inverse 4-bar solve: motor angle (rad) -> arm angle (rad). Monotone
-  ///        bisection of the closing band; clamped to the band edges.
+  ///        bisection over the limb's reachable band; clamped to the band edges.
+  ///        Never throws.
   float arm_from_motor(float motor_rad, int leg) const;
 
   void compute_ik(const Vec3 & target);     ///< runs stage 1 + stage 2, fills tar_angles_
-
-  // Classic delta per-limb geometric solver: given the end-effector position
-  // relative to the base, return the limb's required upper-arm angle
-  // (radians). Throws if unreachable.
-  float delta_calc_angle_deg(float x0, float y0, float z0, const ArmMechConfig & c) const;
 
   // Estimate the 3D end-effector position from the current SERVO (motor)
   // angles (degrees): each motor angle is first converted back to the limb's
@@ -157,6 +226,13 @@ public:
   std::vector<ArmMechConfig> configs_;
 
   float stage1_thetas_[3];  ///< per-limb plane orientations (radians) from stage 1
+
+  // Reachable arm-angle band per limb (radians, arm convention). Resolved once
+  // per geometry by compute_linkage_bands(); read by both directions of the
+  // 4-bar solve so they can never disagree about what is reachable.
+  float band_lo_[3];
+  float band_hi_[3];
+  bool band_valid_[3];
 
   Motor motors_[3];
 

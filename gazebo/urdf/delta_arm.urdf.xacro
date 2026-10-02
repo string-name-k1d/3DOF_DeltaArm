@@ -40,13 +40,49 @@
 <robot name="delta_arm" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
   <!-- ==================== PARAMETERS ==================== -->
-  <xacro:property name="t"          value="0.100" />     <!-- pivot radius  -->
-  <xacro:property name="pr"         value="0.0325" />    <!-- platform radius -->
-  <xacro:property name="rf"         value="0.120" />     <!-- upper arm length -->
-  <xacro:property name="re"         value="0.240" />     <!-- lower rod length -->
-  <xacro:property name="drop"       value="0.149812" />  <!-- platform rest drop -->
-  <xacro:property name="elbow_pitch" value="-0.6742" />  <!-- rod home bend -->
-  <xacro:property name="wrist_pitch" value="2.4674" />   <!-- closure home bend -->
+  <!-- Geometry is driven by the SAME mechanism parameters as the 2-D simulator
+       (config/arm_params.yaml -> "geometry", mm -> m). arm_gazebo.launch.py
+       reads the selected params file and passes these as xacro args, so the
+       Gazebo model tracks alternate sets (e.g. arm_gen0_params.yaml). The
+       defaults below reproduce the original arm_params.yaml values. -->
+  <xacro:arg name="base_radius"     default="0.100"/>   <!-- pivot radius t  -->
+  <xacro:arg name="platform_radius" default="0.0325"/>  <!-- platform radius pr -->
+  <xacro:arg name="upper_arm_len"   default="0.120"/>   <!-- upper arm length rf -->
+  <xacro:arg name="lower_arm_len"   default="0.240"/>   <!-- lower rod length re -->
+
+  <!-- Physical travel of the shoulder joint, in radians.
+       IMPORTANT: the controller owns the reachable envelope. It resolves the
+       usable arm-angle band from the four-bar geometry plus the servo's travel
+       at startup and logs it ("reachable arm band, leg N: [lo, hi] deg"), and
+       the IK refuses anything outside it. This URDF deliberately uses a
+       PERMISSIVE limit rather than a second, hand-tuned envelope: a tighter
+       limit here would silently clamp poses the controller had already
+       accepted, which is the same class of bug the band resolution fixed.
+
+       For reference, the default assembly resolves to ~[32, 100] deg and gen0
+       to ~[0, 101] deg, so this range comfortably contains both. The small
+       margin below 0 exists only for settling transients.
+
+       Note: this Gazebo model drives the shoulder joint directly and does NOT
+       model the four-bar servo linkage (horn/rod), so the joint angle here is
+       the arm angle, not the servo angle. -->
+  <xacro:arg name="shoulder_lower"  default="-0.10"/>
+  <xacro:arg name="shoulder_upper"  default="3.20"/>
+
+  <xacro:property name="t"          value="$(arg base_radius)" />
+  <xacro:property name="pr"         value="$(arg platform_radius)" />
+  <xacro:property name="rf"         value="$(arg upper_arm_len)" />
+  <xacro:property name="re"         value="$(arg lower_arm_len)" />
+  <xacro:property name="shoulder_lo" value="$(arg shoulder_lower)" />
+  <xacro:property name="shoulder_hi" value="$(arg shoulder_upper)" />
+  <!-- Derived rest-pose constants (see header derivation):
+         drop = sqrt(re^2 - (t + rf - pr)^2)
+         rod_pitch  = atan2(drop, t + rf - pr)   (elbow bends DOWN -> -rod_pitch)
+         wrist_pitch = pi - rod_pitch            (closure chain points the other way) -->
+  <xacro:property name="drop"        value="${sqrt(re**2 - (t + rf - pr)**2)}" />
+  <xacro:property name="rod_pitch"   value="${atan2(drop, t + rf - pr)}" />
+  <xacro:property name="elbow_pitch" value="${-rod_pitch}" />
+  <xacro:property name="wrist_pitch" value="${pi - rod_pitch}" />
   <xacro:property name="base_z"     value="0.90" />      <!-- base plane height above ground -->
   <!--
     mount (xacro:arg, default false): true = a "mounted" payload (launched
@@ -60,23 +96,24 @@
   <xacro:arg name="mount" default="false"/>
 
   <!-- Leg geometry: shoulder bases on radius t, yaw 0/120/240 deg. -->
-  <xacro:property name="px0" value="0.0"            />
-  <xacro:property name="py0" value="-0.100"         />
-  <xacro:property name="y0"  value="0.0"            />
-  <xacro:property name="px1" value="0.086602540"    />
-  <xacro:property name="py1" value="0.050"          />
-  <xacro:property name="y1"  value="2.094395102"    />
-  <xacro:property name="px2" value="-0.086602540"   />
-  <xacro:property name="py2" value="0.050"          />
-  <xacro:property name="y2"  value="4.188790205"    />
+  <xacro:property name="y0"  value="0.0"       />
+  <xacro:property name="y1"  value="${2*pi/3}" />
+  <xacro:property name="y2"  value="${4*pi/3}" />
+
+  <xacro:property name="px0" value="${ t*sin(y0)}" />
+  <xacro:property name="py0" value="${-t*cos(y0)}" />
+  <xacro:property name="px1" value="${ t*sin(y1)}" />
+  <xacro:property name="py1" value="${-t*cos(y1)}" />
+  <xacro:property name="px2" value="${ t*sin(y2)}" />
+  <xacro:property name="py2" value="${-t*cos(y2)}" />
 
   <!-- Platform joint points (same radials as the shoulders), in the tool0 rest frame. -->
-  <xacro:property name="jx0" value="0.0"           />
-  <xacro:property name="jy0" value="-0.0325"       />
-  <xacro:property name="jx1" value="0.028145826"   />
-  <xacro:property name="jy1" value="0.01625"       />
-  <xacro:property name="jx2" value="-0.028145826"  />
-  <xacro:property name="jy2" value="0.01625"       />
+  <xacro:property name="jx0" value="${ pr*sin(y0)}" />
+  <xacro:property name="jy0" value="${-pr*cos(y0)}" />
+  <xacro:property name="jx1" value="${ pr*sin(y1)}" />
+  <xacro:property name="jy1" value="${-pr*cos(y1)}" />
+  <xacro:property name="jx2" value="${ pr*sin(y2)}" />
+  <xacro:property name="jy2" value="${-pr*cos(y2)}" />
 
   <!-- ==================== WORLD / BASE ==================== -->
   <!-- The standalone arm is anchored at base_z above the world origin. When
@@ -168,7 +205,10 @@
       <parent link="mount_${idx}"/>
       <child link="upper_arm_${idx}"/>
       <axis xyz="1 0 0"/>
-      <limit effort="20.0" lower="-1.2" upper="1.2" velocity="6.28"/>
+      <!-- Permissive on purpose: the controller's resolved band is the single
+           authority on reachability (see the shoulder_lower/shoulder_upper
+           args). Encoding a tighter limit here would clamp accepted poses. -->
+      <limit effort="20.0" lower="${shoulder_lo}" upper="${shoulder_hi}" velocity="6.28"/>
       <dynamics damping="0.1" friction="0.0"/>
     </joint>
 

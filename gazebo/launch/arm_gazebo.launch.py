@@ -44,12 +44,16 @@ Runs one of:
         use_existing_gz:=true world_name:=apriltag1 mount:=true
 
 The mechanism is built from the SAME geometry parameters as the 2-D simulator
-(config/arm_params.yaml -> "geometry"): edit that file to change link lengths,
-then sync the xacro properties at the top of urdf/delta_arm.urdf.xacro.
+(config/arm_params.yaml -> "geometry"): those values are passed to the xacro as
+arguments (base_radius / platform_radius / upper_arm_len / lower_arm_len), so
+selecting a different params file (ARM_PARAMS_FILE / params_file:=) moves the
+3-D model and the controller together.
 """
 
 import os
+import sys
 
+import yaml
 import xacro as xacro_lib
 
 from ament_index_python.packages import get_package_share_directory
@@ -61,6 +65,36 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+
+
+def _resolve_params_file(default):
+    """Path of the arm params file, resolved before the launch graph exists.
+
+    run_arm.sh exports ARM_PARAMS_FILE; a direct `ros2 launch ... params_file:=`
+    lands in sys.argv. Falls back to the packaged default.
+    """
+    path = os.environ.get('ARM_PARAMS_FILE', '').strip()
+    if path:
+        return path
+    for arg in sys.argv[1:]:
+        if arg.startswith('params_file:='):
+            return arg.split(':=', 1)[1]
+    return default
+
+
+def _geometry_mappings(params_path):
+    """xacro mappings (metres) for the URDF geometry from the params YAML."""
+    try:
+        with open(params_path) as fh:
+            doc = yaml.safe_load(fh) or {}
+    except OSError:
+        return {}
+    geometry = (doc.get('/**', {}).get('ros__parameters', {}) or {}).get('geometry', {}) or {}
+    mappings = {}
+    for key in ('base_radius', 'platform_radius', 'upper_arm_len', 'lower_arm_len'):
+        if key in geometry:
+            mappings[key] = str(float(geometry[key]) / 1000.0)
+    return mappings
 
 
 def generate_launch_description():
@@ -82,12 +116,23 @@ def generate_launch_description():
         arm_gazebo_share, 'urdf',
         'delta_arm.urdf.xacro' if is_delta else 'endpoint.urdf.xacro')
     world = os.path.join(arm_gazebo_share, 'worlds', 'arm_world.sdf')
-    params_file = os.path.join(arm_share, 'config', 'arm_params.yaml')
+    default_params_file = os.path.join(arm_share, 'config', 'arm_params.yaml')
+    params_file = LaunchConfiguration('params_file')
 
     # mount=true drops the payload's fake `world` link so base_link can be
     # welded onto the drone with a single parent (see module docstring).
     # Always passed explicitly (never a bare-file default).
     mappings = {'mount': 'true' if mounted else 'false'}
+
+    # Feed the mechanism geometry (from the SAME params file the controller
+    # loads) into the xacro so the Gazebo model tracks the selected set. The
+    # xacro is processed here at description-build time, before launch args are
+    # resolved, so resolve the file via ARM_PARAMS_FILE / params_file:= (see
+    # _resolve_params_file); fall back to the packaged default geometry.
+    if is_delta:
+        mappings.update(
+            _geometry_mappings(_resolve_params_file(default_params_file)))
+
     robot_description_content = xacro_lib.process_file(
         urdf_xacro, mappings=mappings).toxml()
 
@@ -224,6 +269,11 @@ def generate_launch_description():
             'endpoint', default_value='true',
             description='Include the arm_endpoint node (endpoint state + CoG / '
                         'torque estimate topics). Observational only.'),
+        DeclareLaunchArgument(
+            'params_file', default_value=default_params_file,
+            description='Arm parameter set to load. Defaults to '
+                        'config/arm_params.yaml; use config/arm_gen0_params.yaml '
+                        'for the gen-0 geometry.'),
         DeclareLaunchArgument('mount', default_value='true' if mounted else 'false'),
         DeclareLaunchArgument('mount_offset_z', default_value='-0.05'),
         DeclareLaunchArgument(

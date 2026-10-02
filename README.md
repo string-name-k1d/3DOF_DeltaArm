@@ -163,12 +163,12 @@ arm's **joint-angle convention** and bounded before they reach the servo:
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `port_name` | `/dev/ttyUSB0` | UART/serial port of the bus-servo adapter (Windows: `COM8` `[Win/WSL2]`). |
+| `port_name` | `/dev/ttyUSB0` | UART/serial port of the bus-servo adapter. The WSL number is not fixed: the CH340 enumerates as `COM4`, `COM8`, ... depending on what else is plugged in — check with `usbipd list` on Windows, not by hard-coding. |
 | `baudrate` | `115200` | Serial baud rate. |
 | `servo_ids` | `[0, 1, 2]` | Binary ids of the three delta-arm servos. |
 | `start_angles` | `[0, 0, 0]` | **Installation offset** (deg) per motor: the physical servo angle when the joint sits at the arm's zero/home pose. A commanded joint angle is sent as `joint + start_angles`, so `start_angles` **is** the per-motor installation offset of the servos. |
-| `angle_min` | `[0, 0, 0]` | Physical position limits (deg), **0 = limb fully extended** (away from centre). |
-| `angle_max` | `[145, 145, 145]` | Physical position limits (deg), **145 = most retracted**. |
+| `angle_min` | *(unset)* | Physical position limits (deg), **0 = limb fully extended** (away from centre). Left unset in `arm_params.yaml` so it **inherits `geometry.angle_min`** — one source of truth for the servo's travel. Set it here only for hardware whose travel differs from the modelled geometry (this is how `arm_gen0_params.yaml` overrides it). |
+| `angle_max` | *(unset)* | Physical position limits (deg), **145 = most retracted**. Same inheritance as `angle_min`; the controller reads the shared `geometry.angle_max` when this is absent, so the pose it accepts and the command the driver clamps to always agree. |
 | `max_speed` | `100.0` | Velocity limit (deg/s) used by the servo's trajectory profiling (move interval = dAngle/speed). |
 | `auto_init` | `true` | Ping + sync servos at startup. |
 | `enable_motion` | `true` | Disable to skip the `arm/motor_targets` subscription entirely — motors can never be commanded (feedback-only runs). Ping/telemetry still work. |
@@ -191,8 +191,8 @@ configured for trajectory profiling on every servo at construction.
 | Parameter | Default | Meaning |
 |---|---|---|
 | `step` | `0.01` | Position step per keypress (m). |
-| `axis0` | `z` | WASD primary axis (`x`, `y`, or `z`). |
-| `axis1` | `y` | WASD secondary axis. |
+
+Key mapping: `W`/`S` jog target `y`, `A`/`D` jog `x`, `Z`/`X` jog `z`.
 
 ## 4. ROS Components
 
@@ -203,8 +203,8 @@ configured for trajectory profiling on every servo at construction.
 | Controller          | `arm_controller`    | Task-space `set_pos` action + `get_pos` streaming (two-stage IK).       |
 | Motor driver        | `arm_motor_driver`  | Bridges ROS messages to the FashionStar bus-servo hardware (`fsuartservo`). |
 | Combined (HW)       | `arm_system`        | Controller + Motor driver, one process (default for real hardware).     |
-| Manual control      | `arm_manual`        | Keyboard (WASD) jogging of `set_pos`; prints `get_pos` position changes. |
-| 2-D visualiser      | `arm_sim_sfml`       | SFML top/side view of the arm. Draws the `arm/pos` stream; when the real driver's `arm/motor_feedback` is fresh and all servos online, it draws the **measured** servos instead (real-machine mirror). |
+| Manual control      | `arm_manual`        | Keyboard (WASD + Z/X) jogging of `set_pos`; prints `get_pos` position changes. |
+| 2-D visualiser      | `arm_sim_sfml`       | SFML top/side view of the arm. Draws the `arm/pos` stream; when the real driver's `arm/motor_feedback` is fresh and all servos online, it draws the **measured** servos instead (real-machine mirror). Also marks the controller's commanded target (`arm/pos.target_position`) as `TGT`. |
 
 All topics/services/actions are namespaced under `arm/` in node code, but the
 canonical **ROS-level** names (used by clients in other packages) are listed
@@ -222,8 +222,9 @@ below.
   the `get_pos` stream). `activate=false` releases the stop.
 
 * **`arm/pos`** *(topic `arm/msg/ArmPosition`)*
-  Current end-effector pose + motor angles. Published continuously only while
-  streaming is enabled. The controller also publishes `arm/joints`
+  Current end-effector pose (`position`), the controller's commanded
+  task-space target (`target_position`) and the current/target motor angles.
+  Published continuously only while streaming is enabled. The controller also publishes `arm/joints`
   (`sensor_msgs/JointState`) for the three joint angles.
 
 * **`arm/get_pos`** *(service `arm/srv/TogglePositionStream`)*
@@ -307,6 +308,8 @@ ros2 launch arm delta_arm.launch simulation:=false    # force hardware
 # Feedback-only: boot the full stack but disable all motion (servos will not
 # move). The driver opens the port, pings the servos, and publishes the
 # periodic arm/motor_feedback topic. Nothing is commanded.
+# Motion is disabled by loading config/arm_feedback_only.yaml into both the
+# controller and the driver; see "Feedback-only mode" below.
 ros2 launch arm delta_arm.launch motion:=false
 
 # Then in a second terminal, watch the servo bus feedback:
@@ -337,10 +340,62 @@ ros2 launch arm delta_arm.launch motion:=true   # real controller + motor driver
 ros2 launch arm arm_sim_2d.launch.py            # SFML window only (see below)
 ros2 launch arm arm_sim_2d.launch.py motor:=true   # driver + controller + window
 ros2 launch arm arm_sim_2d.launch.py motor:=true control:=false
-#   feedback-only VISUALISATION: driver runs enable_motion=false (no
-#   arm/motor_targets subscription, nothing can move) and the window draws the
-#   measured servo angles. No controller node is started.
+#   feedback-only VISUALISATION: driver runs enable_motion=false and the
+#   window draws the measured servo angles. No controller node is started.
 ```
+
+#### Feedback-only mode: what is (and is not) guaranteed
+
+`control:=false` is the safe way to look at real hardware. In that mode the
+launch starts **no controller**, and it loads `config/arm_feedback_only.yaml`
+so the driver runs with `enable_motion=false`. The resulting guarantees:
+
+| Property | In `control:=false` |
+| --- | --- |
+| `arm_controller` node | not started |
+| `set_pos` action **server** | none (the 2-D window is only an action *client*) |
+| `arm/motor_targets` subscription | **not created** — the topic has zero endpoints |
+| Servo commands reachable | **none** |
+| `arm/motor_feedback` published | yes |
+| `arm/motor_param_query` served | yes |
+
+Because the driver never subscribes to `arm/motor_targets`, no `MotorTargets`
+message can reach the bus servos even if some other node published one.
+
+> **Why this uses a params file, not an inline launch dict.** Passing
+> `parameters=[params_file, {'enable_motion': False}]` looks correct but is
+> **silently unsafe**: rcl gives an exact `arm_motor_driver:` block inside a
+> params file precedence over a `/**:` wildcard override, so the driver's
+> `enable_motion: true` from `arm_params.yaml` wins and the driver *does* start
+> its `arm/motor_targets` subscription. `config/arm_feedback_only.yaml` is
+> passed **after** `params_file` and is node-specific, so it wins. The same trap
+> applies to `<param name="enable_motion" value="false"/>` in XML launch files,
+> so `delta_arm.launch` also loads this file.
+
+**Always confirm the guarantee on the running system before trusting it with
+hardware** (duplicate node names from a previous run can make you query the
+wrong process, so check the process count too):
+
+```bash
+# exactly one driver instance
+ps -eo args | grep "install/arm/lib/arm/arm_motor_driver" | grep -vc defunct
+
+# must print: Boolean value is: False
+ros2 param get /arm_motor_driver enable_motion
+
+# must print: motion control DISABLED (enable_motion=false) ...
+grep "motion control DISABLED" <launch-log>
+
+# must show no endpoints at all
+ros2 topic info /arm/motor_targets
+
+# must show no arm_controller
+ros2 node list | grep arm
+```
+
+If `enable_motion` reports `True` while you passed `control:=false`, stop —
+do not attach the arm. See
+[Troubleshooting](#8-troubleshooting).
 
 The SFML window shows the **top view (XY)** and **side view (XZ)** of the arm
 with two sources:
@@ -359,20 +414,36 @@ arm through the same `arm/set_pos` action the manual node uses).
 
 ### One-time serial setup (WSL2 USB→container bridge) `[Win/WSL2]`
 
+The bus-servo adapter is a **CH340** (`1a86:7523`). Bring it into WSL2 with
+`usbipd-win`, which needs **Administrator** — it cannot be done from an
+unelevated shell.
+
 ```powershell
-# Windows PowerShell (admin):
-usbipd bind    --hardware-id 1a86:7523 --force     # make COMx shareable
-usbipd attach  --wsl Ubuntu-22.04 --busid 3-9 --auto-attach
+# Windows PowerShell (Administrator):
+usbipd list                                # find the CH340 and note its BUSID
+usbipd bind    --busid 3-9                 # only needed once per device
+usbipd attach  --wsl --busid 3-9
 ```
 
-After attach, the device appears in the WSL2 distro:
+> `bind` makes the device shareable and `attach` attaches it to WSL. Both
+> report "Shared"/"Not shared" in `usbipd list`; the CH340 shows as
+> `USB-SERIAL CH340 (COM4)`. The COM number is assigned by Windows and is
+> **not stable** — it is unrelated to the WSL device name, which is always
+> `/dev/ttyUSB0`.
+
+After attach, the device appears in the WSL2 distro **and** inside the
+container (the service is `privileged: true` and bind-mounts `/dev`):
 
 ```bash
-ls -l /dev/ttyUSB0    # crw-rw---- root dialout ...  → CH340 (1a86:7523)
+ls -l /dev/ttyUSB0   # crw-rw---- root dialout ...  → CH340 (1a86:7523)
 ```
 
-(Find your bus id with `usbipd list`.) Re-attach after reboot or replug with
-the same `attach` command.
+Re-attach after a reboot or replug with the same `attach` command. Detach with
+`usbipd detach --busid 3-9`.
+
+**usbipd-win 5.x** uses the syntax above. Version 4 used
+`usbipd attach --wsl <distro> --busid <id> --auto-attach`; check
+`usbipd --version` if a command is rejected.
 
 ### Monitoring the motor bus (feedback)
 
@@ -425,7 +496,7 @@ colcon test --packages-select arm
 
 ## 6. Controls
 
-### Manual control (WASD)
+### Manual control (WASD + Z/X)
 
 ```bash
 ros2 launch arm manual.launch                  # simulation (default)
@@ -437,18 +508,17 @@ arm. `arm_manual` publishes `set_pos` action goals from the keyboard and
 prints current-position changes as they come in on the `get_pos` stream:
 
 ```
-W/S : +/- z    A/D : +/- y     Q : quit
+W/S : +/- y    A/D : -/+ x    Z/X : +/- z    Q : quit
 ```
 
-The step size and the two axes are configurable:
+`WASD` drives the horizontal (XY) plane and `Z/X` the vertical axis, so the
+whole reachable workspace can be jogged from one key set.
+
+The step size is configurable:
 
 ```bash
-ros2 run arm arm_manual --ros-args \
-    -p step:=0.005 -p axis0:=x -p axis1:=z
+ros2 run arm arm_manual --ros-args -p step:=0.005
 ```
-
-> Note: the WASD axes default to `z` (W/S) and `y` (A/D) in a plane; choose
-> `axis0`/`axis1` from `x`, `y`, `z` to jog a different plane.
 
 ## Component: Gazebo Simulation (`arm_gazebo`)
 
@@ -472,18 +542,18 @@ docker exec fyp_sim bash /root/install/03-gz-harmonic.sh                    # pa
 docker exec fyp_sim bash /root/ros2_ws/src/arm/scripts/install_gazebo_harmonic.sh   # ...or this repo's own script
 ros2 launch arm_gazebo arm_gazebo.launch.py                     # headless
 ros2 launch arm_gazebo arm_gazebo.launch.py gui:=true           # + Gazebo GUI
-ros2 launch arm_gazebo arm_gazebo.launch.py manual:=true        # + WASD terminal
+ros2 launch arm_gazebo arm_gazebo.launch.py manual:=true        # + WASD/Z-X terminal
 ```
 
-`manual:=true` also starts the `arm_manual` WASD node, so you can jog the
+`manual:=true` also starts the `arm_manual` WASD/Z-X node, so you can jog the
 simulated end-effector from the launching terminal:
 
 ```
-W/S : +/- z    A/D : +/- y     Q : quit
+W/S : +/- y    A/D : -/+ x    Z/X : +/- z    Q : quit
 ```
 
 The controller can also run standalone with the sim, or be replaced by the
-WASD jog entirely:
+keyboard jog entirely:
 
 ```bash
 ros2 launch arm delta_arm.launch simulation:=true   # controller only
@@ -501,11 +571,163 @@ The inverse kinematics lives in `src/axis/delta-arm.cpp` (pipe:
 * `Arm::apply()` — forward-kinematics estimate of `cur_pos_`, backed by
   `arm_from_motor` (bisection) + classic delta FK.
 
+### The reachable envelope
+
+The arm can only be in a small region of task space, and both directions of the
+solve are driven from **one** geometry-derived band so they can never disagree.
+`Arm::compute_linkage_bands()` resolves it once per `set_geometry()` as the
+intersection of four constraints:
+
+1. the four-bar linkage can physically close;
+2. the motor angle is non-decreasing in the arm angle — past the linkage's
+   transmission-angle fold the map folds back on itself and no single-valued
+   inverse exists, so that region is unusable;
+3. the commanded motor angle is inside the servo's mechanical travel
+   (`geometry.angle_min` / `geometry.angle_max`);
+4. the arm angle is inside `geometry.arm_angle_min` / `geometry.arm_angle_max`.
+
+The band is logged at startup, per leg:
+
+```
+reachable arm band, leg 0: [31.81, 99.69] deg (servo travel [0.0, 145.0] deg)
+```
+
+| Assembly | Resolved band | Upper edge set by |
+|---|---|---|
+| default (`arm_params.yaml`) | ~`[31.8°, 99.7°]` | the 145° servo stop |
+| gen0 (`arm_gen0_params.yaml`) | ~`[0.05°, 101.1°]` | the linkage itself |
+
+The top of the band is **not** 90°. The arm sweeps past vertical, and the servo
+stop is what finally bounds it (on the default assembly, relaxing the stop to
+200° opens the band to ~127°). Lowering the top edge is how you buy workspace
+once the real servo travel is measured — roughly 3.4° of arm per 5° of servo.
+
+**Unreachable goals are refused, not silently adjusted.** `set_tar_pos()` returns
+a `TargetResult{reached, reason}`; on failure it commits *nothing*, so the arm
+holds position and the streamed target marker stays where the arm actually is.
+The action server aborts with the offending limb named:
+
+```
+target outside the reachable envelope: leg 1 needs arm angle 120.815 deg,
+outside the reachable band [31.81, 99.69] deg
+```
+
+This matters because the old behaviour was invisible: the forward kinematics used
+to clamp any arm angle to 90°, so poses needing more were *accepted* with
+perfectly plausible motor angles while the arm sat somewhere else entirely — up to
+64 mm from the command on the default assembly, affecting ~37% of all accepted
+goals. A wrong-looking motor angle is a far better failure than a silent
+disagreement between the command and the arm.
+
+`arm_angle_from_motor_deg()` is total by construction (it bisects inside the band
+and clamps at its edges), so feedback from a servo that is not currently inside
+the resolved envelope can never throw on the control path.
+
+### Notes on the 3-D model
+
+`gazebo/urdf/delta_arm.urdf.xacro` drives the shoulder joint **directly** and does
+not model the four-bar, so its joint angle is the arm angle rather than the servo
+angle. Its joint limits are deliberately permissive (`shoulder_lower`/
+`shoulder_upper`, `-0.10`/`3.20` rad): the controller is the single authority on
+reachability, and a tighter limit in the URDF would clamp poses the controller had
+already accepted — reintroducing the same silent disagreement in 3-D.
+
+### Integration checks (need the sims running)
+
+The unit tests cover the library. These two cover the whole ROS stack — that what
+the 2-D simulator *draws* is what was *commanded* — and are run by hand:
+
+```bash
+# 2-D: controller + arm_sim_sfml up, then sweep the whole reachable workspace
+python3 arm/test/e2e_sweep.py          # expects worst error 0.000 mm, 3 mm tolerance
+
+# 3-D: ros2 launch arm_gazebo arm_gazebo.launch.py params_file:=... up, then
+#      <band_hi_deg> <label> <reachable x y z> <refused x y z>
+python3 arm/test/gz_joint_check.py 99.69 default -0.12 -0.07 -0.25 -0.12 -0.10 -0.28
+python3 arm/test/gz_joint_check.py 101.13 gen0    0.0 0.0 -0.32  0.0 0.0 -0.14
+```
+
+`e2e_sweep.py` also checks that a refused goal neither moves the arm nor advances
+the target marker, and that no motor is ever commanded past its stop.
+
 See **[`docs/KINEMATICS.md`](docs/KINEMATICS.md)** for the full derivation (stage-1
 closed form, the 4-bar `A/B/C` solve, the `2π − raw` fold and closure band,
-bisection inverse, FK, worked numbers, and the throw/clamp contract).
+bisection inverse, FK, worked numbers, and the band resolution).
 
-## 8. References
+### Known geometry gap: the gen0 linkage does not span the real servo travel
+
+**The `gen0` horn/rod lengths are not yet confirmed against the real arm, and
+the 2-D view now says so instead of hiding it.**
+
+The modelled 4-bar is a near-1:1 coupling, so it only closes across a slice of
+the servo travel. Measured against the current `arm_gen0_params.yaml`
+(horn 35 mm, rod 60 mm):
+
+| | servo θ where the 4-bar closes |
+| --- | --- |
+| `gen0` | **15.1° – 93.0°** |
+| `default` | 78° – 145° |
+
+Real gen0 servos sweep **0–145°**, so most of that travel lies outside the
+modelled closure range. The renderer used to clamp those readings onto a band
+edge, which froze the drawn arm over most of the travel while the `θ` readout
+kept moving — the view looked like it was simply echoing the motor angle. It now
+draws a limb whose linkage cannot close in **orange**, rings the servo shaft, and
+prints `OUT OF LINKAGE CLOSURE` with the raw `θ` and the closing span, instead of
+presenting a frozen pose as fact.
+
+**Calibration datum** (gen0, all three servos at 90°):
+
+| | value |
+| --- | --- |
+| measured | `z ≈ -300 mm` |
+| model predicts | `z = -325 mm` (arm φ 97.4°) |
+| arm φ that would give `-300 mm` | **≈ 81°** |
+
+So the model over-reads the arm angle by roughly **16°** at mid-travel. The
+`base_radius` / `platform_radius` / `upper_arm_len` / `lower_arm_len` values are
+consistent with the measurement; the **servo linkage** (horn length, rod length,
+`arm_attach_dist`, and the horn's mounting zero / `home_offset`) is what needs
+measuring on the real arm. Until then, treat gen0 absolute FK as approximate and
+do not use it as a position reference.
+
+## 8. Troubleshooting
+
+### `enable_motion` is `True` even though I passed `control:=false`
+
+This is the dangerous one, because the driver *is* subscribed to
+`arm/motor_targets` and a stray `MotorTargets` message would be sent to the
+servos. Do not connect the arm until it reads `False`.
+
+It is usually **not** a build problem — it is a parameter-precedence trap plus
+stale ROS state. Check in this order:
+
+1. **A stale node is answering the query.** Duplicate `arm_motor_driver`
+   instances from an earlier launch will make `ros2 param get` report the wrong
+   process (a `drv_min`-style uniquely-named probe also gives a misleading
+   result, because it does not match the `arm_motor_driver:` block in
+   `arm_params.yaml`). Verify with
+   `ps -eo args | grep "install/arm/lib/arm/arm_motor_driver" | grep -vc defunct`,
+   kill leftovers, then `ros2 daemon stop`.
+2. **An inline override was used instead of a params file.** Only
+   `config/arm_feedback_only.yaml` disables motion reliably. Re-add it to
+   `parameters=[...]` *after* `params_file`, or rebuild if it is missing from
+   `install/arm/share/arm/config/`.
+3. **Confirm the driver logged the decision** — `motion control DISABLED
+   (enable_motion=false) - arm/motor_targets subscription not started`.
+
+### Serial device missing
+
+```
+serial device /dev/ttyUSB0 not present/accessible - continuing in
+feedback-only mode with all servos reported offline.
+```
+
+Expected when the bus-servo adapter is not attached, and harmless in
+`control:=false` mode. See "One-time serial setup" in
+[Real hardware](#real-hardware) above.
+
+## 9. References
 
 * [3DOF Delta Arm](https://people.ohio.edu/williams/html/PDF/DeltaKin.pdf)
 * [FashionStart UART Servo C++ Driver](https://github.com/servodevelop/fashionstar-uart-servo-cpp.git)

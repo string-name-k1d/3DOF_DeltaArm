@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <!--
-  Manual (WASD) control of the delta arm.
+  Manual (WASD + Z/X) control of the delta arm.
 
   Launches the arm controller together with the manual-control node, which
-  publishes set_pos action goals from WASD keys and prints current-position
+  publishes set_pos action goals from WASD / Z-X keys and prints current-position
   changes (get_pos stream).
 
   By default the controller runs in simulation mode (no motor driver) - set
@@ -42,7 +42,7 @@
     </node>
   </group>
 
-  <!-- Manual-control node: sends set_pos goals from WASD, prints pos changes. -->
+  <!-- Manual-control node: sends set_pos goals from WASD/Z-X, prints pos changes. -->
   <node pkg="arm" exec="arm_manual" name="arm_manual_control"
         output="screen">
     <param from="$(var params_file)"/>

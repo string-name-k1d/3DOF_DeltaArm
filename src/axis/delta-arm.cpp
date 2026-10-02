@@ -1,6 +1,8 @@
 #include "arm/delta_arm.hpp"
 
 #include <cmath>
+#include <limits>
+#include <sstream>
 #include <stdexcept>
 
 namespace DeltaArm {
@@ -73,6 +75,73 @@ float delta_calc_angle_yz(float x0, float y0, float z0,
     return th0 * kRadToDeg;
 }
 
+/**
+ * Non-throwing 4-bar closed form: arm angle (rad) -> motor angle (rad), folded
+ * into [0, 2*pi) with the driver's convention (0 deg = limb fully extended,
+ * growing angle = arm sweeping downward).
+ *
+ *   a = horn (upper_rod_len)   b = rod (servo_rod_len)
+ *   c = shoulder -> socket     d = servo -> shoulder (ground)
+ *   theta_b = pi - arm_angle
+ *   A = 2 a d cos(theta_b) - 2 b d
+ *   B = 2 a d sin(theta_b)
+ *   C = c^2 - a^2 - b^2 - d^2 + 2 a b cos(theta_b)
+ *   motor = 2*pi - (atan2(B, A) + acos(C / |(A,B)|))        (+ home offset, deg)
+ *
+ * Returns NaN when the linkage CANNOT close, which takes two independent
+ * conditions: the rigid rod must span the servo shaft and the arm-side socket,
+ * AND the horn solve must have a real acos argument. Both are needed - rod
+ * reach alone admits angles where the algebra has no solution (short horn with
+ * a long rod). This is the single shared predicate for both directions of the
+ * solve, so the IK and the forward kinematics can never disagree about which
+ * arm angles are reachable.
+ */
+float four_bar_motor_angle(float theta_arm, const ArmMechConfig& c) {
+    const float a = c.upper_rod_len;
+    const float b = c.servo_rod_len;
+
+    const float sr = c.base_radius + c.arm_attach_dist * std::cos(theta_arm) -
+                     c.arm_attach_offset * std::sin(theta_arm);
+    const float sz = -c.arm_attach_dist * std::sin(theta_arm) -
+                     c.arm_attach_offset * std::cos(theta_arm);
+    const float dist = std::hypot(sr - c.servo_radius, sz - c.servo_z);
+    if (dist > a + b + 1e-3f || dist < std::fabs(a - b) - 1e-3f) {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+
+    const float cc = std::hypot(c.arm_attach_dist, c.arm_attach_offset);
+    const float dd = std::hypot(c.base_radius - c.servo_radius, -c.servo_z);
+    const float tb = kPi - theta_arm;
+    const float A = 2.0f * a * dd * std::cos(tb) - 2.0f * b * dd;
+    const float B = 2.0f * a * dd * std::sin(tb);
+    const float C = cc * cc - a * a - b * b - dd * dd + 2.0f * a * b * std::cos(tb);
+    const float u = C / std::hypot(A, B);
+    if (u < -1.0f || u > 1.0f) {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+
+    return kTwoPi - (std::atan2(B, A) + std::acos(u));
+}
+
+/**
+ * True when the servo 4-bar linkage can physically close at this arm angle
+ * (radians). See four_bar_motor_angle() for the closure conditions.
+ */
+bool linkage_closes(float theta_arm, const ArmMechConfig& c) {
+    return !std::isnan(four_bar_motor_angle(theta_arm, c));
+}
+
+/// Resolution of the reachable-band scan, in radians (~0.02 deg).
+constexpr float kBandScanStep = kPi / 9000.0f;
+/// The resolved band is pulled this far inside the true envelope so that every
+/// arm angle the band admits is strictly inside the closure region. Shrinking
+/// inward is the safe direction: it can only make the IK refuse a pose, never
+/// let it accept one that the forward solve would then have to clamp.
+constexpr float kBandEpsilon = 0.05f * kDegToRad;
+/// Tolerance when testing that the motor angle is non-decreasing across the
+/// band (guards the bisection in arm_from_motor()).
+constexpr float kMotorMonotoneEps = 1e-6f;
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -125,6 +194,7 @@ void Arm::init_default_geometry() {
         c.home_offset = 0.0f;
         configs_.push_back(c);
     }
+    compute_linkage_bands();
 }
 
 void Arm::set_geometry(const std::vector<ArmMechConfig>& configs) {
@@ -132,6 +202,172 @@ void Arm::set_geometry(const std::vector<ArmMechConfig>& configs) {
         throw std::invalid_argument("set_geometry requires exactly 3 limb configs");
     }
     configs_ = configs;
+    compute_linkage_bands();
+}
+
+/**
+ * Resolve the reachable upper-arm angle band of every limb from the current
+ * geometry. This is the authoritative definition of "can the arm be there",
+ * and BOTH directions of the 4-bar solve are driven from it, so the IK can only
+ * accept poses the forward kinematics reproduces exactly.
+ *
+ * The band is the intersection of four constraints:
+ *   1. the linkage can physically close (four_bar_motor_angle() is real);
+ *   2. the motor angle is non-decreasing in the arm angle - past the four-bar's
+ *      transmission-angle fold the map folds back on itself and no
+ *      single-valued inverse exists, so that region is not usable;
+ *   3. the commanded motor angle is inside the servo's mechanical travel;
+ *   4. the arm angle is inside the configured arm_angle_min/arm_angle_max.
+ *
+ * Constraint 1 alone is not the answer: the closure region wraps around the
+ * turn (the linkage "closes" again near +-180 deg) and, for the default
+ * geometry, extends well past 90 deg - the arm does not stop sweeping up just
+ * because it is perpendicular to the base. The widest closure run is picked to
+ * resolve the wrap, then 2-4 trim it down.
+ *
+ * Runs once per set_geometry(); both solves are hot paths, so the band is
+ * cached rather than searched per call.
+ */
+void Arm::compute_linkage_bands() {
+    for (int leg = 0; leg < 3; ++leg) {
+        const ArmMechConfig& c = configs_[leg];
+        band_valid_[leg] = false;
+        band_lo_[leg] = 0.0f;
+        band_hi_[leg] = 0.0f;
+
+        // 1. Every maximal run of closing arm angles over a full turn.
+        float run_lo = 0.0f;
+        float best_lo = 0.0f;
+        float best_hi = 0.0f;
+        bool in_run = false;
+        bool found_run = false;
+        const int n = static_cast<int>(kTwoPi / kBandScanStep);
+        for (int i = 0; i <= n; ++i) {
+            const float th = -kPi + static_cast<float>(i) * kBandScanStep;
+            const bool closes = linkage_closes(th, c);
+            if (closes && !in_run) {
+                run_lo = th;
+                in_run = true;
+            }
+            if (!closes && in_run) {
+                in_run = false;
+                if (!found_run || (th - run_lo) > (best_hi - best_lo)) {
+                    best_lo = run_lo;
+                    best_hi = th;
+                    found_run = true;
+                }
+            }
+        }
+        if (in_run && (!found_run || (kPi - run_lo) > (best_hi - best_lo))) {
+            best_lo = run_lo;
+            best_hi = kPi;
+            found_run = true;
+        }
+        if (!found_run) continue;  // the four-bar can never close on this limb
+
+        // 2. Longest sub-interval of that run satisfying 2-4 above. A segment is
+        //    finalised when it ends so that its OWN endpoints are the ones
+        //    compared - tracking the length separately from the endpoints would
+        //    otherwise keep the last (possibly tiny) run but its longest
+        //    neighbour's length.
+        float best_seg_lo = 0.0f;
+        float best_seg_hi = 0.0f;
+        float best_seg_len = -1.0f;
+        float cur_lo = 0.0f;
+        float cur_hi = 0.0f;
+        bool in_seg = false;
+        float prev_motor = 0.0f;
+        const int steps = static_cast<int>((best_hi - best_lo) / kBandScanStep);
+        for (int i = 0; i <= steps; ++i) {
+            const float th = best_lo + static_cast<float>(i) * kBandScanStep;
+            const float motor = four_bar_motor_angle(th, c);
+
+            bool ok = !std::isnan(motor);
+            if (ok) {
+                // Servo travel is checked on the COMMANDED angle, i.e. after the
+                // home offset, because that is what the driver clamps.
+                const float cmd_deg = (motor + c.home_offset) * kRadToDeg;
+                ok = cmd_deg >= c.motor_angle_min - 1e-3f && cmd_deg <= c.motor_angle_max + 1e-3f;
+            }
+            if (ok) {
+                ok = (th + kBandEpsilon) >= c.arm_angle_min && (th - kBandEpsilon) <= c.arm_angle_max;
+            }
+            if (ok && in_seg && (motor + kMotorMonotoneEps) < prev_motor) {
+                ok = false;  // four-bar fold: no single-valued inverse past here
+            }
+
+            if (ok) {
+                if (!in_seg) {
+                    cur_lo = th;
+                    in_seg = true;
+                }
+                cur_hi = th;
+            } else if (in_seg) {
+                in_seg = false;
+                if ((cur_hi - cur_lo) > best_seg_len) {
+                    best_seg_len = cur_hi - cur_lo;
+                    best_seg_lo = cur_lo;
+                    best_seg_hi = cur_hi;
+                }
+            }
+            if (ok) prev_motor = motor;
+        }
+        if (in_seg && (cur_hi - cur_lo) > best_seg_len) {
+            best_seg_len = cur_hi - cur_lo;
+            best_seg_lo = cur_lo;
+            best_seg_hi = cur_hi;
+        }
+        if (best_seg_len < 0.0f) continue;  // nothing survives the servo / arm-angle window
+
+        // Inward by an epsilon so the advertised edges are strictly inside the
+        // region the scan actually validated.
+        band_lo_[leg] = best_seg_lo + kBandEpsilon;
+        band_hi_[leg] = best_seg_hi - kBandEpsilon;
+        band_valid_[leg] = band_hi_[leg] > band_lo_[leg];
+        if (!band_valid_[leg]) {
+            band_lo_[leg] = 0.0f;
+            band_hi_[leg] = 0.0f;
+        }
+    }
+}
+
+bool Arm::get_linkage_band(int leg, float& lo_deg, float& hi_deg) const {
+    if (leg < 0 || leg > 2) return false;
+    lo_deg = band_lo_[leg] * kRadToDeg;
+    hi_deg = band_hi_[leg] * kRadToDeg;
+    return band_valid_[leg];
+}
+
+float Arm::arm_angle_from_motor_deg(float motor_deg, int leg) const {
+    const float motor_rad = motor_deg * kDegToRad - configs_[leg].home_offset;
+    return arm_from_motor(motor_rad, leg) * kRadToDeg;
+}
+
+bool Arm::linkage_motor_span(int leg, float & motor_lo_deg, float & motor_hi_deg) const {
+    if (!band_valid_[leg]) return false;
+    motor_lo_deg = motor_from_arm_unchecked(band_lo_[leg], leg) * kRadToDeg;
+    motor_hi_deg = motor_from_arm_unchecked(band_hi_[leg], leg) * kRadToDeg;
+    return true;
+}
+
+bool Arm::try_arm_from_motor_deg(float motor_deg, int leg, float & arm_out) const {
+    if (!band_valid_[leg]) return false;
+
+    const float motor_rad = motor_deg * kDegToRad - configs_[leg].home_offset;
+    const float m_lo = motor_from_arm_unchecked(band_lo_[leg], leg);
+    const float m_hi = motor_from_arm_unchecked(band_hi_[leg], leg);
+    // Outside the closure range there is no arm angle that reproduces this
+    // motor angle on the modelled linkage: report it instead of clamping.
+    if (motor_rad <= m_lo || motor_rad >= m_hi) return false;
+
+    float lo = band_lo_[leg];
+    float hi = band_hi_[leg];
+    for (int i = 0; i < 60; ++i) {
+        const float mid = 0.5f * (lo + hi);
+        if (motor_from_arm_unchecked(mid, leg) > motor_rad) hi = mid; else lo = mid;
+    }
+    arm_out = 0.5f * (lo + hi) * kRadToDeg;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,89 +428,94 @@ void Arm::ik_stage1(const Vec3& target) {
  * The result is folded into the range [0, 2pi) with the convention 0 deg =
  * limb fully extended and GROWING angle sweeping the arm DOWNWARD (fits the
  * driver's nominal [0,145] deg range), then the home/calibration offset is
- * added. Throws when the arm angle cannot be reached through the linkage.
+ * added. The algebra lives in four_bar_motor_angle(); this wrapper only turns
+ * "the linkage cannot close" into an exception so the IK has something to
+ * report. Callers should normally have checked the limb's reachable band
+ * first (see compute_linkage_bands()), which is tighter than closure alone.
  */
 float Arm::motor_from_arm(float theta_arm, int leg) const {
-    const ArmMechConfig& c = configs_[leg];
-    const float a = c.upper_rod_len;
-    const float b = c.servo_rod_len;
-    const float cc = std::hypot(c.arm_attach_dist, c.arm_attach_offset);
-    const float dd = std::hypot(c.base_radius - c.servo_radius, -c.servo_z);
-
-    // Geometric closure test: the rod (length b) must physically span the
-    // servo shaft and the arm-side socket. Flat arms leave the socket too far
-    // from the servo for the linkage to close even though the algebraic solve
-    // below still returns a number.
-    const float sr = c.base_radius + c.arm_attach_dist * std::cos(theta_arm) - c.arm_attach_offset * std::sin(theta_arm);
-    const float sz = -c.arm_attach_dist * std::sin(theta_arm) - c.arm_attach_offset * std::cos(theta_arm);
-    const float dist = std::hypot(sr - c.servo_radius, sz - c.servo_z);
-    if (dist > a + b + 1e-3f || dist < std::fabs(a - b) - 1e-3f) {
+    const float motor = four_bar_motor_angle(theta_arm, configs_[leg]);
+    if (std::isnan(motor)) {
         throw std::invalid_argument("four-bar linkage cannot close at this arm angle");
     }
+    return motor;
+}
 
-    const float tb = kPi - theta_arm;                     // 180 deg - arm angle
-    const float A = 2.0f * a * dd * std::cos(tb) - 2.0f * b * dd;
-    const float B = 2.0f * a * dd * std::sin(tb);
-    const float C = cc * cc - a * a - b * b - dd * dd + 2.0f * a * b * std::cos(tb);
-    const float R = std::hypot(A, B);
-    const float u = C / R;
-    if (u < -1.0f || u > 1.0f) {
-        throw std::invalid_argument("four-bar linkage cannot close at this arm angle");
-    }
-
-    const float raw = std::atan2(B, A) + std::acos(u);
-    return kTwoPi - raw;                                   // fold into [0, 2pi)
+float Arm::motor_from_arm_unchecked(float theta_arm, int leg) const {
+    // Only ever called on arm angles that compute_linkage_bands() already
+    // proved close, so the result is always a real number. Nothing here can
+    // throw, which is what keeps the forward estimate exception-free.
+    return four_bar_motor_angle(theta_arm, configs_[leg]);
 }
 
 /**
  * INVERSE 4-bar solve: motor angle (rad) -> arm angle (rad).
  *
- * The closed form above is monotone within the linkage's closing band
- * [band_low, 90 deg] (below band_low the connecting rod cannot physically
- * close), so the inverse is found by bisection. Motor angles outside the band
- * are clamped to the nearest edge. Never throws.
+ * Bisects the limb's reachable band, which compute_linkage_bands() guarantees
+ * is a region where motor_from_arm() is real and non-decreasing, so the
+ * bisection is well posed. Motor angles outside the band - the servo sitting at
+ * a hard stop, or feedback from a pose the current geometry cannot represent -
+ * are clamped to the nearest band edge.
+ *
+ * Never throws: this runs inside apply() on every control tick, and an
+ * exception escaping the controller's timer callback would take the node down.
+ * It is the forward estimate, so clamping is the right behaviour - the arm
+ * physically cannot be anywhere else.
  */
 float Arm::arm_from_motor(float motor_rad, int leg) const {
-    const ArmMechConfig& c = configs_[leg];
-    const float a = c.upper_rod_len;
-    const float b = c.servo_rod_len;
-
-    // Smallest arm angle at which the linkage still closes (rod fully
-    // stretched):  |socket(arm) - servo| == a + b.
-    float lo = 0.0f, hi = kPi / 2.0f;
-    for (int i = 0; i < 48; ++i) {
-        const float mid = 0.5f * (lo + hi);
-        const float t = mid;
-        const float r = c.base_radius + c.arm_attach_dist * std::cos(t) - c.arm_attach_offset * std::sin(t);
-        const float zz = -c.arm_attach_dist * std::sin(t) - c.arm_attach_offset * std::cos(t);
-        const float dist = std::hypot(r - c.servo_radius, zz - c.servo_z);
-        if (dist <= a + b) hi = mid; else lo = mid;
+    if (!band_valid_[leg]) {
+        // No reachable arm angle on this limb. The IK refuses every pose, so
+        // the only job here is to stay finite and deterministic.
+        return 0.0f;
     }
-    const float band_low = 0.5f * (lo + hi);
-    const float band_high = kPi / 2.0f;
 
-    if (motor_rad <= motor_from_arm(band_low, leg)) return band_low;
-    if (motor_rad >= motor_from_arm(band_high, leg)) return band_high;
+    const float m_lo = motor_from_arm_unchecked(band_lo_[leg], leg);
+    const float m_hi = motor_from_arm_unchecked(band_hi_[leg], leg);
+    if (motor_rad <= m_lo) return band_lo_[leg];
+    if (motor_rad >= m_hi) return band_hi_[leg];
 
-    lo = band_low;
-    hi = band_high;
+    float lo = band_lo_[leg];
+    float hi = band_hi_[leg];
     for (int i = 0; i < 60; ++i) {
         const float mid = 0.5f * (lo + hi);
-        if (motor_from_arm(mid, leg) > motor_rad) hi = mid; else lo = mid;
+        if (motor_from_arm_unchecked(mid, leg) > motor_rad) hi = mid; else lo = mid;
     }
     return 0.5f * (lo + hi);
 }
 
 float Arm::ik_stage2(float theta, int leg) {
+    // The band check is the reachable test. motor_from_arm() would only reject
+    // arm angles outside the linkage's closure region; the band is tighter (it
+    // also folds in the servo travel and the arm-angle window), so a pose the
+    // driver could not actually hold is refused here instead of being commanded
+    // and then silently clamped by the servo.
+    if (!band_valid_[leg] || theta < band_lo_[leg] || theta > band_hi_[leg]) {
+        std::ostringstream os;
+        os << "leg " << leg << " needs arm angle " << (theta * kRadToDeg) << " deg, outside the reachable band ";
+        if (band_valid_[leg]) {
+            os << "[" << (band_lo_[leg] * kRadToDeg) << ", " << (band_hi_[leg] * kRadToDeg) << "] deg";
+        } else {
+            os << "(empty: the linkage cannot close within the servo's travel)";
+        }
+        throw std::invalid_argument(os.str());
+    }
+
     const float motor_rad = motor_from_arm(theta, leg);
     return (motor_rad + configs_[leg].home_offset) * kRadToDeg;
 }
 
 void Arm::compute_ik(const Vec3& target) {
     ik_stage1(target);
+    // Solve every limb before committing any of them: a target can become
+    // unreachable on leg 2 after legs 0 and 1 have succeeded, and a partial
+    // commit would leave the arm half-way to a pose that was rejected.
+    float angles[3];
     for (int leg = 0; leg < 3; ++leg) {
-        tar_angles_[leg] = ik_stage2(stage1_thetas_[leg], leg);
-        motors_[leg].set_tar_pos(tar_angles_[leg]);
+        angles[leg] = ik_stage2(stage1_thetas_[leg], leg);
+    }
+    for (int leg = 0; leg < 3; ++leg) {
+        tar_angles_[leg] = angles[leg];
+        motors_[leg].set_tar_pos(angles[leg]);
     }
 }
 
@@ -285,8 +526,11 @@ void Arm::compute_ik(const Vec3& target) {
  * kinematics, DeltaKin reference).
  */
 Vec3 Arm::forward_kinematics(const float angles_deg[3]) const {
-    // Convert the SERVO (motor) angles back to limb//upper-arm angles through
-    // the 4-bar linkage, then run the classic delta FK on the arm angles.
+    // Convert the SERVO (motor) angles back to the limb upper-arm angles
+    // through the 4-bar linkage, then run the classic delta FK on the arm
+    // angles. arm_from_motor() clamps to the limb's reachable band and cannot
+    // throw, so a servo resting at a hard stop yields the nearest pose the
+    // mechanism can actually be in rather than killing the control loop.
     float ang_deg[3];
     for (int i = 0; i < 3; ++i) {
         const float motor_rad = angles_deg[i] * kDegToRad - configs_[i].home_offset;
@@ -366,13 +610,18 @@ Vec3 Arm::forward_kinematics(const float angles_deg[3]) const {
 // ---------------------------------------------------------------------------
 // Public state interface
 // ---------------------------------------------------------------------------
-void Arm::set_tar_pos(float x, float y, float z) {
-    tar_pos_ = {x, y, z};
+TargetResult Arm::set_tar_pos(float x, float y, float z) {
+    const Vec3 goal{x, y, z};
     try {
-        compute_ik(tar_pos_);
-    } catch (const std::exception&) {
-        // Unreachable target: leave the previous targets intact.
+        compute_ik(goal);
+    } catch (const std::exception& e) {
+        // Unreachable target: leave the previous motor targets and the previous
+        // commanded position intact, but report why. Swallowing this silently
+        // made a rejected goal look exactly like a dead motor.
+        return TargetResult{false, e.what()};
     }
+    tar_pos_ = goal;
+    return TargetResult{true, {}};
 }
 
 Vec3 Arm::get_tar_pos() const { return tar_pos_; }

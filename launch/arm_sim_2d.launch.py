@@ -19,6 +19,8 @@
 #                      false = visualization-only using motor feedbacks.
 #   endpoint (true)   include the arm_endpoint node (endpoint state + CoG /
 #                      torque estimate topics). Observational only.
+#   params_file       arm parameter set to load ("config/arm_params.yaml"
+#                      default; point at config/arm_gen0_params.yaml for gen-0).
 
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -32,11 +34,14 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('arm')
-    params_file = os.path.join(pkg_share, 'config', 'arm_params.yaml')
+    default_params_file = os.path.join(pkg_share, 'config', 'arm_params.yaml')
+    feedback_only_file = os.path.join(
+        pkg_share, 'config', 'arm_feedback_only.yaml')
 
     motor = LaunchConfiguration('motor')
     control = LaunchConfiguration('control')
     endpoint = LaunchConfiguration('endpoint')
+    params_file = LaunchConfiguration('params_file')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -50,6 +55,11 @@ def generate_launch_description():
             'endpoint', default_value='true',
             description='Include the arm_endpoint node (endpoint state + CoG / '
                         'torque estimate topics).'),
+        DeclareLaunchArgument(
+            'params_file', default_value=default_params_file,
+            description='Arm parameter set to load. Defaults to '
+                        'config/arm_params.yaml; use config/arm_gen0_params.yaml '
+                        'for the gen-0 geometry.'),
 
         # Virtual-sim controller (no motor driver): the two-in-one behaviour
         # that arm_sim_2d.launch.py had before the motor/control args.
@@ -118,7 +128,11 @@ def generate_launch_description():
                             executable='arm_motor_driver',
                             name='arm_motor_driver',
                             output='screen',
-                            parameters=[params_file, {'enable_motion': False}],
+                            # feedback_only_file must be a node-specific params
+                            # file: an inline {'enable_motion': False} dict is a
+                            # "/**:" wildcard and LOSES to the arm_motor_driver
+                            # block in params_file, leaving motion enabled.
+                            parameters=[params_file, feedback_only_file],
                         ),
                     ],
                 ),

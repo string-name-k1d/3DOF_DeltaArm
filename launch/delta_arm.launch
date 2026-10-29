@@ -26,7 +26,7 @@
        + CoG / torque estimate topics). Purely observational; it never commands
        motion. NOTE: the full-hardware arm_system process already embeds the
        endpoint node, so in that mode this arg is ignored (a second arm_endpoint
-       would clash on the node name) — the endpoint is always present there. -->
+       would clash on the node name) - the endpoint is always present there. -->
   <arg name="endpoint" default="true"/>
   <arg name="params_file"
        default="$(find-pkg-share arm)/config/arm_params.yaml"/>
@@ -53,11 +53,11 @@
     <group unless="$(var simulation)">
       <node pkg="arm" exec="arm_controller" name="arm_controller" output="screen">
         <param from="$(var params_file)"/>
-        <param from="$(find arm)/config/arm_feedback_only.yaml"/>
+        <param from="$(find-pkg-share arm)/config/arm_feedback_only.yaml"/>
       </node>
       <node pkg="arm" exec="arm_motor_driver" name="arm_motor_driver" output="screen">
         <param from="$(var params_file)"/>
-        <param from="$(find arm)/config/arm_feedback_only.yaml"/>
+        <param from="$(find-pkg-share arm)/config/arm_feedback_only.yaml"/>
       </node>
       <node pkg="arm" exec="arm_endpoint" name="arm_endpoint" output="screen"
             if="$(var endpoint)">

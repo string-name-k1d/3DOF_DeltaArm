@@ -7,6 +7,8 @@ bool healthy
 bool ready
 
 # Mode hints inferred from observed interfaces.
+# True when the arm stack appears configured for position-target control
+# (controller/action present). This does not imply goals are currently accepted.
 bool motion_enabled
 bool controller_seen
 bool driver_seen

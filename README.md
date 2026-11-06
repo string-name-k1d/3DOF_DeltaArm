@@ -217,9 +217,20 @@ below.
   `linear.x/y/z`, runs two-stage IK and publishes motor commands.
 
 * **`arm/emergency_stop`** *(service `arm/srv/EmergencyStop`)*
-  Emergency interrupt: `activate=true` cancels any in-flight `set_pos` goal,
-  rejects new goals, zeroes the motor outputs and republishes them (and pauses
-  the `get_pos` stream). `activate=false` releases the stop.
+  Unified emergency interrupt. Supports `action=ACTIVATE|RELEASE|TOGGLE` and
+  keeps legacy `activate` for backward compatibility.
+
+  ```bash
+  ros2 service call arm/emergency_stop arm/srv/EmergencyStop "{activate: true}"
+  ros2 service call arm/emergency_stop arm/srv/EmergencyStop "{action: 2}"  # toggle
+  ros2 service call arm/emergency_stop arm/srv/EmergencyStop "{action: 1}"  # release
+  ```
+
+* **`arm/health`** *(topic `arm/msg/ArmHealth`)*
+  Periodic arm health snapshot from `arm_health_monitor`: controller/driver/node
+  hints, control-state freshness, emergency state, and motor feedback summary.
+  `motion_enabled` means position-target control is supported/configured, not
+  that goals are currently accepted.
 
 * **`arm/pos`** *(topic `arm/msg/ArmPosition`)*
   Current end-effector pose (`position`), the controller's commanded

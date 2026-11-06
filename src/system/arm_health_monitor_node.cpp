@@ -123,7 +123,10 @@ private:
       }
     }
 
-    msg.motion_enabled = has_set_pos || has_targets_sub || msg.accepts_goals;
+    // "motion_enabled" means the controller/stack is configured to accept or
+    // forward position-target control, not that goals are currently accepted
+    // (an e-stop intentionally blocks acceptance).
+    msg.motion_enabled = has_set_pos || has_targets_sub || has_control_state_pub || msg.controller_seen;
 
     std::vector<std::string> issues;
     const bool controller_expected = msg.controller_seen || has_control_state_pub || has_set_pos;

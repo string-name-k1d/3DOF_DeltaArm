@@ -48,7 +48,6 @@ set(arm_srv_files
   "srv/TogglePositionStream.srv"
   "srv/MotorParamQuery.srv"
   "srv/EmergencyStop.srv"
-  "srv/ToggleEmergencyStop.srv"
 )
 set(arm_action_files
   "action/SetPosition.action"

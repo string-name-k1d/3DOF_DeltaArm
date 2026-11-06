@@ -1,9 +1,22 @@
 # Emergency interrupt for the arm controller.
 #
-# activate = true  -> halt immediately: cancel any active set_pos goal, reject
-#                     new goals, zero the motor outputs and republish them.
-# activate = false -> release the emergency state (allow set_pos again).
-bool activate
+# action:
+#   ACTIVATE = 0  -> latch emergency stop (halts goals/motion output path)
+#   RELEASE  = 1  -> release emergency stop (returns to home control state)
+#   TOGGLE   = 2  -> activate when inactive, release when active
+#
+# `activate` is kept for backward compatibility:
+#   - if `action == LEGACY` (default), `activate` controls the request
+#   - otherwise `action` takes precedence
+uint8 LEGACY = 255
+uint8 ACTIVATE = 0
+uint8 RELEASE = 1
+uint8 TOGGLE = 2
+
+uint8 action 255
+bool activate true
 ---
 bool success
 bool emergency_active
+# Resulting emergency state as a string (e.g. "zero_emergency", "inactive").
+string state

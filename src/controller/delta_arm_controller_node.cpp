@@ -179,6 +179,7 @@ void DeltaArmControllerNode::setupActionServer() {
     auto control_state_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
     control_state_pub_ = create_publisher<arm::msg::ControlState>("arm/control_state", control_state_qos);
     publishControlState();
+    control_state_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() { publishControlState(); });
 
     if (!enable_motion_) {
         RCLCPP_INFO(get_logger(), "motion control DISABLED (enable_motion=false) - set_pos action not started");
@@ -254,27 +255,25 @@ void DeltaArmControllerNode::setupEmergencyStop() {
     estop_srv_ = create_service<arm::srv::EmergencyStop>(
         "arm/emergency_stop", [this](const std::shared_ptr<arm::srv::EmergencyStop::Request> req,
                                      const std::shared_ptr<arm::srv::EmergencyStop::Response> resp) {
-            if (req->activate) {
-                applyEmergencyStop("emergency stop service");
-                resp->success = true;
-                resp->emergency_active = true;
-            } else {
-                releaseEmergencyStop("emergency stop service");
-                resp->success = true;
-                resp->emergency_active = false;
+            const bool currently_active = state_control_.isEmergencyActive();
+            bool want_active = req->activate;
+            if (req->action == arm::srv::EmergencyStop::Request::ACTIVATE) {
+                want_active = true;
+            } else if (req->action == arm::srv::EmergencyStop::Request::RELEASE) {
+                want_active = false;
+            } else if (req->action == arm::srv::EmergencyStop::Request::TOGGLE) {
+                want_active = !currently_active;
             }
-        });
 
-    estop_toggle_srv_ = create_service<arm::srv::ToggleEmergencyStop>(
-        "arm/emergency_stop/toggle", [this](const std::shared_ptr<arm::srv::ToggleEmergencyStop::Request> /*req*/,
-                                            const std::shared_ptr<arm::srv::ToggleEmergencyStop::Response> resp) {
-            if (state_control_.isEmergencyActive()) {
-                releaseEmergencyStop("emergency stop toggle service");
+            if (want_active) {
+                applyEmergencyStop("arm/emergency_stop");
             } else {
-                applyEmergencyStop("emergency stop toggle service");
+                releaseEmergencyStop("arm/emergency_stop");
             }
+
             resp->success = true;
             resp->emergency_active = state_control_.isEmergencyActive();
+            resp->state = resp->emergency_active ? ArmStateControl::toString(state_control_.getState()) : "inactive";
         });
 }
 

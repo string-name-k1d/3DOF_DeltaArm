@@ -1,0 +1,6 @@
+# Toggle the arm emergency stop.
+#
+# Returns the resulting emergency state so callers do not need a separate read.
+---
+bool success
+bool emergency_active

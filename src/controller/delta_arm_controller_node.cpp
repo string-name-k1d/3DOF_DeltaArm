@@ -176,7 +176,8 @@ void DeltaArmControllerNode::declareParams() {
 
 void DeltaArmControllerNode::setupActionServer() {
     motor_pub_ = create_publisher<arm::msg::MotorTargets>("arm/motor_targets", 10);
-    control_state_pub_ = create_publisher<arm::msg::ControlState>("arm/control_state", 10);
+    auto control_state_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+    control_state_pub_ = create_publisher<arm::msg::ControlState>("arm/control_state", control_state_qos);
     publishControlState();
 
     if (!enable_motion_) {
@@ -210,46 +211,70 @@ void DeltaArmControllerNode::setupGetPosition() {
     feedback_timer_ = create_wall_timer(period, [this]() { publishPosition(); });
 }
 
+bool DeltaArmControllerNode::applyEmergencyStop(const std::string & reason) {
+    const bool changed = state_control_.activateEmergencyStop(reason);
+
+    if (current_goal_handle_ && current_goal_handle_->is_active()) {
+        auto res = std::make_shared<SetPosition::Result>();
+        res->succeeded = false;
+        res->message = "aborted by emergency stop";
+        current_goal_handle_->abort(res);
+        current_goal_handle_.reset();
+    }
+
+    augmenter_.reset();
+    arm_.stop();
+    const float zero[3] = {0.0f, 0.0f, 0.0f};
+    publishTargets(zero);
+    streaming_ = false;
+    publishControlState();
+
+    if (changed) {
+        RCLCPP_WARN(get_logger(), "EMERGENCY STOP - motors zeroed, actions halted, state=%s (%s)",
+                    ArmStateControl::toString(state_control_.getState()), reason.c_str());
+    } else {
+        RCLCPP_WARN(get_logger(), "EMERGENCY STOP refreshed while already active (%s)", reason.c_str());
+    }
+    return true;
+}
+
+bool DeltaArmControllerNode::releaseEmergencyStop(const std::string & reason) {
+    const bool changed = state_control_.releaseEmergencyStop(reason);
+    publishControlState();
+    if (changed) {
+        RCLCPP_INFO(get_logger(), "emergency stop released, state=%s (%s)",
+                    ArmStateControl::toString(state_control_.getState()), reason.c_str());
+    } else {
+        RCLCPP_INFO(get_logger(), "emergency stop release ignored (already inactive) (%s)", reason.c_str());
+    }
+    return true;
+}
+
 void DeltaArmControllerNode::setupEmergencyStop() {
     estop_srv_ = create_service<arm::srv::EmergencyStop>(
         "arm/emergency_stop", [this](const std::shared_ptr<arm::srv::EmergencyStop::Request> req,
                                      const std::shared_ptr<arm::srv::EmergencyStop::Response> resp) {
             if (req->activate) {
-                // 1) Cross out any in-flight set_pos goal.
-                if (current_goal_handle_ && current_goal_handle_->is_active()) {
-                    auto res = std::make_shared<SetPosition::Result>();
-                    res->succeeded = false;
-                    res->message = "aborted by emergency stop";
-                    current_goal_handle_->abort(res);
-                    current_goal_handle_.reset();
-                }
-
-                // 2) Latch the zero/emergency state, zero the arm, and
-                //    republish the (zeroed) motor output. Reset the augmenter
-                //    first so the estop zero is delivered immediately and is
-                //    not clamped by the slew limiter.
-                state_control_.activateEmergencyStop("emergency stop service");
-                augmenter_.reset();
-                arm_.stop();
-                const float zero[3] = {0.0f, 0.0f, 0.0f};
-                publishTargets(zero);
-                publishControlState();
-
-                // 3) Latch: reject new goals until released; also pause streaming.
-                streaming_ = false;
-
+                applyEmergencyStop("emergency stop service");
                 resp->success = true;
                 resp->emergency_active = true;
-                RCLCPP_WARN(get_logger(), "EMERGENCY STOP - motors zeroed, actions halted, state=%s",
-                            ArmStateControl::toString(state_control_.getState()));
             } else {
-                state_control_.releaseEmergencyStop("emergency stop service");
-                publishControlState();
+                releaseEmergencyStop("emergency stop service");
                 resp->success = true;
                 resp->emergency_active = false;
-                RCLCPP_INFO(get_logger(), "emergency stop released, state=%s",
-                            ArmStateControl::toString(state_control_.getState()));
             }
+        });
+
+    estop_toggle_srv_ = create_service<arm::srv::ToggleEmergencyStop>(
+        "arm/emergency_stop/toggle", [this](const std::shared_ptr<arm::srv::ToggleEmergencyStop::Request> /*req*/,
+                                            const std::shared_ptr<arm::srv::ToggleEmergencyStop::Response> resp) {
+            if (state_control_.isEmergencyActive()) {
+                releaseEmergencyStop("emergency stop toggle service");
+            } else {
+                applyEmergencyStop("emergency stop toggle service");
+            }
+            resp->success = true;
+            resp->emergency_active = state_control_.isEmergencyActive();
         });
 }
 

@@ -39,6 +39,7 @@ set(arm_msg_files
   "msg/ArmFeedback.msg"
   "msg/MotorTargets.msg"
   "msg/ControlState.msg"
+  "msg/ArmHealth.msg"
   "msg/EndpointState.msg"
   "msg/CogEstimate.msg"
   "msg/TorqueEstimate.msg"
@@ -47,6 +48,7 @@ set(arm_srv_files
   "srv/TogglePositionStream.srv"
   "srv/MotorParamQuery.srv"
   "srv/EmergencyStop.srv"
+  "srv/ToggleEmergencyStop.srv"
 )
 set(arm_action_files
   "action/SetPosition.action"
@@ -158,6 +160,11 @@ add_executable(arm_endpoint
 )
 arm_ros_target(arm_endpoint)
 
+add_executable(arm_health_monitor
+  src/system/arm_health_monitor_node.cpp
+)
+arm_ros_target(arm_health_monitor)
+
 # Standalone motor driver.
 add_executable(arm_motor_driver
   src/driver/motor_driver.cpp
@@ -207,6 +214,7 @@ install(TARGETS
   arm_motor_driver
   arm_manual
   arm_endpoint
+  arm_health_monitor
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

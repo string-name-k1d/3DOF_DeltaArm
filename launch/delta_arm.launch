@@ -28,6 +28,7 @@
        endpoint node, so in that mode this arg is ignored (a second arm_endpoint
        would clash on the node name) - the endpoint is always present there. -->
   <arg name="endpoint" default="true"/>
+  <arg name="health" default="true"/>
   <arg name="params_file"
        default="$(find-pkg-share arm)/config/arm_params.yaml"/>
 
@@ -79,4 +80,7 @@
       <param from="$(var params_file)"/>
     </node>
   </group>
+
+  <node pkg="arm" exec="arm_health_monitor" name="arm_health_monitor" output="screen"
+        if="$(var health)"/>
 </launch>

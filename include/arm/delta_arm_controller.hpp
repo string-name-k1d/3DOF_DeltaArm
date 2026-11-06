@@ -16,6 +16,7 @@
 #include "arm/msg/control_state.hpp"
 #include "arm/msg/motor_targets.hpp"
 #include "arm/srv/emergency_stop.hpp"
+#include "arm/srv/toggle_emergency_stop.hpp"
 #include "arm/srv/toggle_position_stream.hpp"
 #include "arm/delta_arm.hpp"
 
@@ -47,6 +48,8 @@ private:
   void publishPosition();
   void publishTargets(const float * angles);
   void publishControlState();
+  bool applyEmergencyStop(const std::string & reason);
+  bool releaseEmergencyStop(const std::string & reason);
 
   // rclcpp_action callbacks
   rclcpp_action::GoalResponse handleGoal(
@@ -62,6 +65,7 @@ private:
   rclcpp::Publisher<arm::msg::ControlState>::SharedPtr control_state_pub_;
   rclcpp::Service<arm::srv::TogglePositionStream>::SharedPtr toggle_srv_;
   rclcpp::Service<arm::srv::EmergencyStop>::SharedPtr estop_srv_;
+  rclcpp::Service<arm::srv::ToggleEmergencyStop>::SharedPtr estop_toggle_srv_;
   rclcpp::TimerBase::SharedPtr feedback_timer_;
 
   std::shared_ptr<GoalHandle> current_goal_handle_;

@@ -128,7 +128,6 @@ endfunction()
 add_executable(arm_system
   src/controller/delta_arm_controller_node.cpp
   src/driver/motor_driver_node.cpp
-  src/endpoint/arm_endpoint_node.cpp
   src/system/arm_state_control.cpp
   src/system/control_augmenter.cpp
   src/system/endpoint_module.cpp
@@ -138,26 +137,19 @@ arm_ros_target(arm_system)
 target_link_libraries(arm_system arm_lib arm_kinematics)
 
 # Standalone controller (simulation / external driver). The logic-only control
-# augmenter (src/system/control_augmenter.cpp) and the control-state machine
-# (src/system/arm_state_control.cpp) are compiled in here too, since the
-# controller node owns both.
+# augmenter (src/system/control_augmenter.cpp), the control-state machine
+# (src/system/arm_state_control.cpp) and the endpoint module
+# (src/system/endpoint_module.cpp) are compiled in here too, since the
+# controller node owns all three and publishes the arm/endpoint/* topics itself.
 add_executable(arm_controller
   src/controller/delta_arm_controller_node.cpp
   src/controller/delta_arm_controller_main.cpp
   src/system/arm_state_control.cpp
   src/system/control_augmenter.cpp
+  src/system/endpoint_module.cpp
 )
 arm_ros_target(arm_controller)
 target_link_libraries(arm_controller arm_kinematics)
-
-# Terminal end-effector node: owns the swappable EndpointModule and publishes
-# the endpoint state + CoG / torque estimates (skeleton; null module).
-add_executable(arm_endpoint
-  src/endpoint/arm_endpoint_node.cpp
-  src/endpoint/arm_endpoint_main.cpp
-  src/system/endpoint_module.cpp
-)
-arm_ros_target(arm_endpoint)
 
 add_executable(arm_health_monitor
   src/system/arm_health_monitor_node.cpp
@@ -202,6 +194,15 @@ if(SFML_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.
 endif()
 
 # ---------------------------------------------------------------------------
+# Arm-side connector (standalone, ROS-free library skeleton)
+# ---------------------------------------------------------------------------
+# Discover/transport/descriptor + the connector state machine for the pogo-pin
+# CAN link to an external actuator. Kept ROS-free and self-contained so it can
+# also be configured/built on its own:
+#   cmake -S arm/connector -B /tmp/arm_connector && cmake --build /tmp/arm_connector
+add_subdirectory(connector)
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
 install(TARGETS
@@ -212,7 +213,6 @@ install(TARGETS
   arm_controller
   arm_motor_driver
   arm_manual
-  arm_endpoint
   arm_health_monitor
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib

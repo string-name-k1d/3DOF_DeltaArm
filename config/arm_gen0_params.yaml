@@ -44,24 +44,20 @@ arm_controller:
       #   Gen-0 linkage (a=35/b=60, attach=52) only closes near z=-0.33.
       home_pos: [0.0, 0.0, -0.33]
 
-# ============================================================================
-# Terminal end-effector node (skeleton). Owns the swappable EndpointModule and
-# publishes the endpoint state plus the CoG / torque estimates.
-# ============================================================================
-arm_endpoint:
-  ros__parameters:
+    # --- Terminal end-effector module (merged into this node) ----------------
+    # The controller owns the swappable EndpointModule and publishes the
+    # arm/endpoint/{state,cog_estimate,torque_estimate} topics itself (the
+    # former standalone arm_endpoint node no longer exists).
     # module_type: which end-effector module to instantiate. Only "null" (a
     #   placeholder with the full interface) exists today; unknown values fall
     #   back to it. New real modules (gripper, camera rig, ...) are added by
     #   implementing EndpointModule — see src/system/endpoint_module.cpp.
     module_type: "null"
-    # frame_id: frame attached to the published endpoint/CoG/torque messages.
-    frame_id: "base_link"
-    # publish_rate: rate of arm/endpoint/state, arm/endpoint/cog_estimate and
-    #   arm/endpoint/torque_estimate (Hz).
-    publish_rate: 5.0
+    # endpoint_publish_rate: rate of the arm/endpoint/* topics (Hz). Endpoint
+    #   messages use feedback_frame above.
+    endpoint_publish_rate: 5.0
     # connector_connected: initial state of the dummy connector flag. Real
-    #   hardware will drive this from a limit switch on the tool mount.
+    #   hardware will drive this from the connector state machine instead.
     connector_connected: false
     # payload_mass_kg: synthetic tool/payload mass used by the CoG and torque
     #   estimators when the connector is set.

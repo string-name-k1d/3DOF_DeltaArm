@@ -249,26 +249,11 @@ def generate_launch_description():
             ])),
     )
 
-    # Terminal end-effector node (endpoint state + CoG / torque estimates).
-    # Observational only, so it runs for BOTH payloads.
-    endpoint_node = Node(
-        package='arm',
-        executable='arm_endpoint',
-        name='arm_endpoint',
-        output='screen',
-        parameters=[params_file],
-        condition=IfCondition(LaunchConfiguration('endpoint')),
-    )
-
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='false'),
         DeclareLaunchArgument('verbose', default_value='true'),
         DeclareLaunchArgument('manual', default_value='false'),
         DeclareLaunchArgument('payload', default_value=payload),
-        DeclareLaunchArgument(
-            'endpoint', default_value='true',
-            description='Include the arm_endpoint node (endpoint state + CoG / '
-                        'torque estimate topics). Observational only.'),
         DeclareLaunchArgument(
             'params_file', default_value=default_params_file,
             description='Arm parameter set to load. Defaults to '
@@ -299,5 +284,4 @@ def generate_launch_description():
         cmd_bridge,
         controller,
         manual,
-        endpoint_node,
     ])

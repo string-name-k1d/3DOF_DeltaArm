@@ -1,5 +1,5 @@
 # Estimated combined centre of gravity of the arm + attached payload, published
-# by the arm_endpoint node on topic "arm/endpoint/cog_estimate".
+# by the arm_controller node on topic "arm/endpoint/cog_estimate".
 #
 # Skeleton message: values come from the endpoint module (payload CoG) combined
 # with the arm's own CoG. A future estimator can fill these from real dynamics;

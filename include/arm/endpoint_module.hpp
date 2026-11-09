@@ -24,10 +24,10 @@ namespace DeltaArmRos
  *   - payload mass and centre of gravity,
  *   - centre-of-gravity and hold-torque estimates.
  *
- * Modules are selected by the arm_endpoint node via the `module_type`
+ * Modules are selected by the arm_controller node via the `module_type`
  * parameter and created through makeEndpointModule(); adding a new real module
  * means adding a new implementation of this interface plus a factory branch —
- * no changes to the node or the controller.
+ * no changes to the node or the rest of the controller.
  */
 class EndpointModule
 {
@@ -40,7 +40,8 @@ public:
   // True for real (non-stub) hardware; false for the null placeholder.
   virtual bool isActive() const = 0;
 
-  // Dummy connector flag for now. Real modules will read a limit switch here.
+  // Dummy connector flag for now. A real connector module (arm/connector/)
+  // will drive this from the CAN link's discovered/connected state.
   virtual bool connectorConnected() const = 0;
 
   // Attach / detach the payload (updates connector state).

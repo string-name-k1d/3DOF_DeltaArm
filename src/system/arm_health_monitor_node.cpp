@@ -73,7 +73,9 @@ private:
     const auto node_names = get_node_names();
     msg.controller_seen = hasNode(node_names, "arm_controller");
     msg.driver_seen = hasNode(node_names, "arm_motor_driver");
-    msg.endpoint_seen = hasNode(node_names, "arm_endpoint");
+    // The endpoint module is owned by arm_controller now (no arm_endpoint node);
+    // treat a live arm/endpoint/state publisher as the endpoint being present.
+    msg.endpoint_seen = count_publishers("arm/endpoint/state") > 0;
 
     const auto topics = get_topic_names_and_types();
     bool has_set_pos = false;
@@ -161,7 +163,7 @@ private:
       }
     }
     if (require_endpoint_ && !msg.endpoint_seen) {
-      issues.emplace_back("arm_endpoint node missing");
+      issues.emplace_back("arm/endpoint/state missing");
     }
 
     msg.issues = issues;

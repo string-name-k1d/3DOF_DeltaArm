@@ -232,6 +232,14 @@ below.
   `motion_enabled` means position-target control is supported/configured, not
   that goals are currently accepted.
 
+* **`arm/endpoint/*`** *(topics + service, owned by `arm_controller`)*
+  `arm/endpoint/state` (`EndpointState`), `arm/endpoint/cog_estimate`
+  (`CogEstimate`), `arm/endpoint/torque_estimate` (`TorqueEstimate`) and the
+  `arm/endpoint/attach` (`std_srvs/SetBool`) service. Observational: reports the
+  terminal module's connector flag, payload mass/CoG and estimates; nothing
+  here commands the motors. The CAN link skeleton for a real actuator lives in
+  `connector/` (see `connector/README.md`).
+
 * **`arm/pos`** *(topic `arm/msg/ArmPosition`)*
   Current end-effector pose (`position`), the controller's commanded
   task-space target (`target_position`) and the current/target motor angles.

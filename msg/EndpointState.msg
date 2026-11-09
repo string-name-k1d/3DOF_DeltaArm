@@ -1,4 +1,4 @@
-# State of the arm's terminal endpoint module, published by the arm_endpoint
+# State of the arm's terminal endpoint module, published by the arm_controller
 # node on topic "arm/endpoint/state". Describes whether an end-effector tool /
 # payload is attached, and the physical parameters the module contributes to
 # dynamics (centre of gravity, mass) used by the CoG / torque estimators.

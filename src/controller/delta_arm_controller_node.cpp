@@ -14,16 +14,28 @@ DeltaArmControllerNode::DeltaArmControllerNode(const rclcpp::NodeOptions& option
     setupActionServer();
     setupGetPosition();
     setupEmergencyStop();
+    setupEndpoint();
 
     RCLCPP_INFO(get_logger(), "arm_controller ready (set_pos action / get_pos streaming), state=%s",
                 ArmStateControl::toString(state_control_.getState()));
 }
 
-DeltaArmControllerNode::~DeltaArmControllerNode() { feedback_timer_->cancel(); }
+DeltaArmControllerNode::~DeltaArmControllerNode() {
+    if (feedback_timer_) {
+        feedback_timer_->cancel();
+    }
+    if (control_state_timer_) {
+        control_state_timer_->cancel();
+    }
+    if (endpoint_timer_) {
+        endpoint_timer_->cancel();
+    }
+}
 
 void DeltaArmControllerNode::declareParams() {
     feedback_rate_ = declare_parameter<double>("feedback_rate", 20.0);
     feedback_frame_ = declare_parameter<std::string>("feedback_frame", "base_link");
+    endpoint_publish_rate_ = declare_parameter<double>("endpoint_publish_rate", 5.0);
 
     // Mechanism geometry (mm) - shared with the visualisers via arm_params.yaml.
     const double base_radius = declare_parameter<double>("geometry.base_radius", 100.0);
@@ -393,6 +405,68 @@ void DeltaArmControllerNode::publishControlState() {
     msg->current_position[2] = cur.z;
 
     control_state_pub_->publish(*msg);
+}
+
+// ---------------------------------------------------------------------------
+// Terminal end-effector module (merged from the former arm_endpoint node)
+// ---------------------------------------------------------------------------
+void DeltaArmControllerNode::setupEndpoint() {
+    // Select the terminal module. Only "null" exists today; the factory falls
+    // back to it so a gripper/camera value degrades instead of crashing.
+    const std::string module_type = declare_parameter<std::string>("module_type", "null");
+    endpoint_module_ = EndpointModule::makeEndpointModule(module_type, *this);
+
+    endpoint_state_pub_ = create_publisher<arm::msg::EndpointState>("arm/endpoint/state", 10);
+    endpoint_cog_pub_ = create_publisher<arm::msg::CogEstimate>("arm/endpoint/cog_estimate", 10);
+    endpoint_torque_pub_ = create_publisher<arm::msg::TorqueEstimate>("arm/endpoint/torque_estimate", 10);
+
+    // Toggle the dummy connector / attach-detach a payload. `data: true` attaches.
+    endpoint_attach_srv_ = create_service<std_srvs::srv::SetBool>(
+        "arm/endpoint/attach", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> req,
+                                      std::shared_ptr<std_srvs::srv::SetBool::Response> resp) {
+            endpoint_module_->setConnectorConnected(req->data);
+            resp->success = true;
+            resp->message = endpoint_module_->connectorConnected() ? "payload attached" : "payload detached";
+            RCLCPP_INFO(get_logger(), "%s (connector_connected=%s)", resp->message.c_str(),
+                        endpoint_module_->connectorConnected() ? "true" : "false");
+            // Republish now so the effect is visible without waiting a cycle.
+            publishEndpoint();
+        });
+
+    const auto period = std::chrono::milliseconds(
+        static_cast<int64_t>(1000.0 / (endpoint_publish_rate_ > 0.0 ? endpoint_publish_rate_ : 1.0)));
+    endpoint_timer_ = create_wall_timer(period, [this]() { publishEndpoint(); });
+
+    RCLCPP_INFO(get_logger(), "endpoint module: %s (active=%s), publishing arm/endpoint/* at %.1f Hz",
+                endpoint_module_->type().c_str(), endpoint_module_->isActive() ? "yes" : "stub",
+                endpoint_publish_rate_);
+    publishEndpoint();
+}
+
+void DeltaArmControllerNode::publishEndpoint() {
+    if (!endpoint_module_) {
+        return;
+    }
+
+    const auto stamp = now();
+
+    arm::msg::EndpointState state_msg;
+    state_msg.header.stamp = stamp;
+    state_msg.header.frame_id = feedback_frame_;
+    endpoint_module_->fillEndpointState(state_msg);
+    endpoint_state_pub_->publish(state_msg);
+
+    arm::msg::CogEstimate cog_msg;
+    cog_msg.header.stamp = stamp;
+    cog_msg.header.frame_id = feedback_frame_;
+    endpoint_module_->fillCogEstimate(cog_msg);
+    endpoint_cog_pub_->publish(cog_msg);
+
+    arm::msg::TorqueEstimate torque_msg;
+    torque_msg.header.stamp = stamp;
+    torque_msg.header.frame_id = feedback_frame_;
+    endpoint_module_->fillTorqueEstimate(torque_msg);
+    endpoint_torque_pub_->publish(torque_msg);
 }
 
 void DeltaArmControllerNode::publishPosition() {

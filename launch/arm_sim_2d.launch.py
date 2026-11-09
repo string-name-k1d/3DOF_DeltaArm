@@ -17,10 +17,13 @@
 #   motor    (false)  include the real arm_motor_driver node.
 #   control  (true)   enable set_pos motor control (only meaningful with motor).
 #                      false = visualization-only using motor feedbacks.
-#   endpoint (true)   include the arm_endpoint node (endpoint state + CoG /
-#                      torque estimate topics). Observational only.
 #   params_file       arm parameter set to load ("config/arm_params.yaml"
 #                      default; point at config/arm_gen0_params.yaml for gen-0).
+#
+# The arm/endpoint/* topics (endpoint state + CoG / torque estimates) are now
+# published by arm_controller itself, so no separate endpoint node is launched.
+# In feedback-only mode (control:=false) no controller runs, hence no endpoint
+# topics - feedback visualisation is the whole point of that mode.
 
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -40,7 +43,6 @@ def generate_launch_description():
 
     motor = LaunchConfiguration('motor')
     control = LaunchConfiguration('control')
-    endpoint = LaunchConfiguration('endpoint')
     params_file = LaunchConfiguration('params_file')
 
     return LaunchDescription([
@@ -51,10 +53,6 @@ def generate_launch_description():
             'control', default_value='true',
             description='Enable set_pos motor control (motor mode only); '
                         'false = visualization-only using motor feedbacks.'),
-        DeclareLaunchArgument(
-            'endpoint', default_value='true',
-            description='Include the arm_endpoint node (endpoint state + CoG / '
-                        'torque estimate topics).'),
         DeclareLaunchArgument(
             'params_file', default_value=default_params_file,
             description='Arm parameter set to load. Defaults to '
@@ -79,17 +77,6 @@ def generate_launch_description():
             name='arm_sim_sfml',
             output='screen',
             parameters=[params_file],
-        ),
-
-        # Terminal end-effector node: endpoint state + CoG / torque estimates.
-        # Purely observational, so it runs in every mode.
-        Node(
-            package='arm',
-            executable='arm_endpoint',
-            name='arm_endpoint',
-            output='screen',
-            parameters=[params_file],
-            condition=IfCondition(endpoint),
         ),
 
         # Motor mode, control ON: driver + controller so set_pos jogs the real

@@ -1,5 +1,5 @@
 # Estimated torque required at the arm joints / end-effector to hold or move
-# the attached payload, published by the arm_endpoint node on topic
+# the attached payload, published by the arm_controller node on topic
 # "arm/endpoint/torque_estimate".
 #
 # Skeleton message: the null endpoint module estimates a gravity-hold torque

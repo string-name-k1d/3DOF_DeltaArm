@@ -176,6 +176,12 @@ def generate_launch_description():
         ],
     )
 
+    bridge_args = [
+        '/delta_arm/shoulder_0/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
+        '/delta_arm/shoulder_1/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
+        '/delta_arm/shoulder_2/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
+        js_bridge_arg,
+    ]
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
@@ -183,12 +189,22 @@ def generate_launch_description():
         output='screen',
         arguments=[
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
-            '/delta_arm/shoulder_0/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
-            '/delta_arm/shoulder_1/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
-            '/delta_arm/shoulder_2/cmd_pos@std_msgs/msg/Float64]gz.msgs.Double',
-            js_bridge_arg,
+            *bridge_args,
         ],
         remappings=[(js_topic, '/joint_states')],
+        condition=IfCondition(LaunchConfiguration('bridge_clock')),
+    )
+    # Attach mode: the world owner (the drone payload) already bridges /clock.
+    # A second clock publisher makes simulated time jump backwards and forces
+    # tf2 to keep clearing its buffer, so omit it when asked.
+    bridge_no_clock = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='parameter_bridge',
+        output='screen',
+        arguments=bridge_args,
+        remappings=[(js_topic, '/joint_states')],
+        condition=UnlessCondition(LaunchConfiguration('bridge_clock')),
     )
 
     rsp = Node(
@@ -262,6 +278,11 @@ def generate_launch_description():
         DeclareLaunchArgument('mount', default_value='true' if mounted else 'false'),
         DeclareLaunchArgument('mount_offset_z', default_value='-0.05'),
         DeclareLaunchArgument(
+            'bridge_clock', default_value='true',
+            description='Bridge the Gazebo clock to /clock. Set false when '
+                        'attaching to a world whose owner already bridges it '
+                        '(the drone payload), so simulated time does not jump.'),
+        DeclareLaunchArgument(
             'use_existing_gz', default_value='false',
             description='Do NOT start a Gazebo server; spawn the arm into an '
                         'already-running one (e.g. the PX4 drone world). The '
@@ -280,6 +301,7 @@ def generate_launch_description():
         gz_sim,
         spawn_entity,
         bridge,
+        bridge_no_clock,
         welder,
         cmd_bridge,
         controller,

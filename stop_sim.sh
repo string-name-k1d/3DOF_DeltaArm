@@ -86,8 +86,13 @@ else
 fi
 pkill -9 -f "install/arm_gazebo/lib/arm_gazebo/arm_cmd_bridge"
 pkill -9 -f "lib/ros_gz_sim/create"
-pkill -9 -f "lib/ros_gz_bridge/parameter_bridge"
-pkill -9 -x robot_state_publisher
+# The arm's parameter_bridge is identified by its /delta_arm/... topics.
+# Do not kill every parameter_bridge: when the arm is attached to the drone's
+# world, the drone's camera bridge uses the same executable.
+pkill -9 -f "parameter_bridge.*delta_arm"
+# comm is truncated to 15 chars ('robot_state_pub'), so -x on the full name
+# never matches; kill by the executable path instead.
+pkill -9 -f "lib/[r]obot_state_publisher/robot_state_publisher"
 sleep 1
 
 # ros2 launch wrapper processes left behind by the above (child death makes

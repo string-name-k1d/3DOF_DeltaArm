@@ -17,8 +17,6 @@ ManualControlNode::ManualControlNode(const rclcpp::NodeOptions & options)
     "arm/pos", 10,
     [this](const arm::msg::ArmPosition::SharedPtr msg) { onPosition(msg); });
 
-  toggle_client_ = create_client<arm::srv::TogglePositionStream>("arm/get_pos");
-
   RCLCPP_INFO(get_logger(), "arm_manual_control ready (waiting for set_pos server)");
 }
 
@@ -40,18 +38,6 @@ void ManualControlNode::send_target(double x, double y, double z)
   action_client_->async_send_goal(goal);
 
   RCLCPP_INFO(get_logger(), "sent set_pos -> (%.3f, %.3f, %.3f)", x, y, z);
-}
-
-void ManualControlNode::enable_position_streaming()
-{
-  if (!toggle_client_->wait_for_service(std::chrono::seconds(5))) {
-    RCLCPP_WARN(get_logger(), "get_pos service not available - cannot enable streaming");
-    return;
-  }
-
-  auto req = std::make_shared<arm::srv::TogglePositionStream::Request>();
-  req->enable = true;
-  toggle_client_->async_send_request(req);
 }
 
 void ManualControlNode::onPosition(const arm::msg::ArmPosition::SharedPtr msg)

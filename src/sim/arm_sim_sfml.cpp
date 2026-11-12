@@ -19,8 +19,6 @@ ArmSimSFMLNode::ArmSimSFMLNode(const rclcpp::NodeOptions & options)
     "arm/motor_feedback", 10,
     [this](const arm::msg::ArmFeedback::SharedPtr msg) { onFeedback(msg); });
 
-  toggle_client_ = create_client<arm::srv::TogglePositionStream>("arm/get_pos");
-
   configureKinematics();
 
   RCLCPP_INFO(get_logger(),
@@ -132,21 +130,6 @@ void ArmSimSFMLNode::send_target(double x, double y, double z)
     };
   action_client_->async_send_goal(goal, opts);
   RCLCPP_INFO(get_logger(), "sent set_pos -> (%.3f, %.3f, %.3f)", x, y, z);
-}
-
-void ArmSimSFMLNode::enable_position_streaming()
-{
-  if (streaming_) return;
-
-  if (!toggle_client_->wait_for_service(std::chrono::seconds(3))) {
-    RCLCPP_WARN(get_logger(), "get_pos service not available - cannot enable streaming");
-    return;
-  }
-
-  auto req = std::make_shared<arm::srv::TogglePositionStream::Request>();
-  req->enable = true;
-  toggle_client_->async_send_request(req);
-  streaming_ = true;
 }
 
 void ArmSimSFMLNode::onPosition(const arm::msg::ArmPosition::SharedPtr msg)

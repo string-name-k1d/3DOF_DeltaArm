@@ -1,40 +1,59 @@
-# Docker compose for the arm container (one service; launch = entrypoint ARG).
+# Docker compose for the arm container.
 #
 # The container runs as root, mounts the repo at /root/ws (the repo root IS
 # the `arm` package) and uses the Dockerfile ENTRYPOINT `/root/run_arm.sh`,
-# whose FIRST ARGUMENT selects what runs — there are NO separate compose files
-# per part (sim vs hardware); they are picked with launch options/flags:
+# whose FIRST ARGUMENT selects what runs:
 #
 #   docker compose build arm                 # build the image (once)
-#   docker compose run --rm arm              # REAL HARDWARE (controller + driver)
-#   docker compose run --rm arm simulation   # controller only (sim provided externally)
-#   docker compose run --rm arm bash         # dev shell / build in the workspace
+#   docker compose run --rm arm simulation   # controller only (no USB needed)
+#   docker compose run --rm arm bash         # dev shell / build (no USB needed)
+#   docker compose run --rm arm-hardware     # REAL HARDWARE (controller + driver)
 #
-# The USB serial binding (below) is only needed for the hardware run. On a host
-# without the adapter, run `SERIAL_DEVICE=/dev/null docker compose run ...` (or
-# use the wrapped workflow in the parent workspace, which hot-plugs the device).
+# The USB serial adapter is bound only by the `arm-hardware` service, so the
+# default `arm` service always starts - including on machines/CI where the
+# adapter is not plugged in. Override the host path for hardware with
+# SERIAL_DEVICE=/dev/ttyUSB2 docker compose run --rm arm-hardware ...
+
+x-arm-common: &arm-common
+  image: arm:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+
+  working_dir: /root/ws
+
+  stdin_open: true
+  tty: true
+
+  environment:
+    # X11 display for the 2-D SFML window. These come from the calling shell;
+    # a headless host simply leaves DISPLAY empty and arm_sim_sfml exits with
+    # a clear message instead of aborting. The X socket/cookie mounts are
+    # added by scripts/launch_container.sh only when the host paths exist
+    # (podman-backed compose refuses a missing bind source).
+    - DISPLAY=${DISPLAY:-}
+    - QT_X11_NO_MITSHM=1
+    - XAUTHORITY=/tmp/.Xauthority
+
+  volumes:
+    - .:/root/ws
+
+  # dialout group: the group owning serial devices (matters if the process
+  # UID is not root; running as root, access is granted regardless).
+  group_add:
+    - "20"
 
 services:
+  # Simulation / development. No host devices are required, so this service
+  # starts even when the servo adapter is absent.
   arm:
-    image: arm:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *arm-common
 
-    working_dir: /root/ws
-
-    stdin_open: true
-    tty: true
-
-    volumes:
-      - .:/root/ws
-
-    # USB serial adapter for the FashionStar bus-servos (host:container).
-    # Override the path with SERIAL_DEVICE=/dev/ttyUSB2 docker compose run ...
+  # Real hardware: adds the FashionStar USB serial adapter. The "hardware"
+  # profile keeps `docker compose up` from starting it; an explicit
+  # `docker compose run --rm arm-hardware` still works.
+  arm-hardware:
+    <<: *arm-common
+    profiles: ["hardware"]
     devices:
       - "${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0"
-
-    # dialout group: the group owning serial devices (matters if the process
-    # UID is not root; running as root, access is granted regardless).
-    group_add:
-      - "20"

@@ -11,7 +11,6 @@
 #include "arm/delta_arm.hpp"
 #include "arm/msg/arm_feedback.hpp"
 #include "arm/msg/arm_position.hpp"
-#include "arm/srv/toggle_position_stream.hpp"
 
 namespace DeltaArmSim
 {
@@ -23,8 +22,7 @@ namespace DeltaArmSim
  * the arm controller *exactly* like the manual-control node does:
  *
  *  * action-client to "arm/set_pos"  : forwards commanded targets;
- *  * subscribes "arm/pos"             : current position + motor angles;
- *  * enables "arm/get_pos" streaming  : so "arm/pos" is published.
+ *  * subscribes "arm/pos"             : current position + motor angles.
  *
  * While a fresh, all-online "arm/motor_feedback" message is arriving, the
  * renderer instead draws the REAL machine: the three measured servo angles
@@ -53,9 +51,6 @@ public:
 
   /// @brief Send a target; replaces any in-flight goal (mirrors the manual node).
   void send_target(double x, double y, double z);
-
-  /// @brief Ask the controller for continuous "arm/pos" publishing.
-  void enable_position_streaming();
 
   // ── Kinematics (shared with the controller) ──────────────────────────────
   //
@@ -183,7 +178,6 @@ private:
   rclcpp_action::Client<SetPosition>::SharedPtr action_client_;
   rclcpp::Subscription<arm::msg::ArmPosition>::SharedPtr pos_sub_;
   rclcpp::Subscription<arm::msg::ArmFeedback>::SharedPtr fb_sub_;
-  rclcpp::Client<arm::srv::TogglePositionStream>::SharedPtr toggle_client_;
 
   /// Kinematics reference used only to convert motor -> arm angles for drawing
   /// and to seed the initial posture. Holds no motion state of its own.
@@ -191,7 +185,6 @@ private:
 
   std::string last_rejection_;
 
-  bool streaming_ = false;
   rclcpp::Time fb_last_;
   bool got_fb_ = false;
 

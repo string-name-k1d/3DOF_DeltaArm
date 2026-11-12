@@ -4,15 +4,11 @@
   <name>arm</name>
   <version>0.1.0</version>
   <description>
-    The 3DOF delta arm package. A single ROS 2 package hosting the custom
-    interfaces (SetPosition action, ArmPosition / MotorTargets messages,
-    EmergencyStop / MotorParamQuery / TogglePositionStream services), the
-    two-stage inverse-kinematics library, the task-space controller node
-    (set_pos action / get_pos streaming), the manual-control (WASD) tool,
-    the FashionStart UART-servo motor driver (fsuartservo + cserialport built
-    from the checked-out submodule sources), and the arm simulators (SFML 2D
-    + Gazebo 3D). The controller + driver can run tightly coupled in a single
-    process (arm_system).
+    Minimal 3DOF delta arm package. Provides the custom SetPosition action,
+    ArmPosition / MotorTargets / ArmFeedback messages, the two-stage
+    inverse-kinematics controller node (set_pos action + arm/pos feedback
+    topic), the FashionStart UART-servo motor driver (arm/motor_targets ->
+    arm/motor_feedback), and an optional 2-D SFML visualiser.
   </description>
   <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
   <license>Apache-2.0</license>
@@ -26,7 +22,6 @@
   <depend>geometry_msgs</depend>
   <depend>action_msgs</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_srvs</depend>
 
   <exec_depend>rosidl_default_runtime</exec_depend>
 

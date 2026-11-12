@@ -69,7 +69,7 @@ void MotorDriver::close()
 }
 
 // ---------------------------------------------------------------------------
-// Queries (generic "same interface" model)
+// Queries
 // ---------------------------------------------------------------------------
 bool MotorDriver::ping(int motor_index, bool * online)
 {
@@ -84,66 +84,6 @@ double MotorDriver::query_angle(int motor_index)
   // Report back in the joint frame (subtract the install offset) so the
   // measured angle is comparable to the commanded joint angle.
   return servos_[motor_index]->queryAngle() - install_offset_[motor_index];
-}
-
-uint16_t MotorDriver::queryVoltage(int motor_index)
-{
-  if (motor_index < 0 || motor_index > 2 || servos_[motor_index] == nullptr) return 0;
-  return servos_[motor_index]->queryVoltage();
-}
-
-uint16_t MotorDriver::queryCurrent(int motor_index)
-{
-  if (motor_index < 0 || motor_index > 2 || servos_[motor_index] == nullptr) return 0;
-  return servos_[motor_index]->queryCurrent();
-}
-
-uint16_t MotorDriver::queryPower(int motor_index)
-{
-  if (motor_index < 0 || motor_index > 2 || servos_[motor_index] == nullptr) return 0;
-  return servos_[motor_index]->queryPower();
-}
-
-uint16_t MotorDriver::queryTemperature(int motor_index)
-{
-  if (motor_index < 0 || motor_index > 2 || servos_[motor_index] == nullptr) return 0;
-  return servos_[motor_index]->queryTemperature();
-}
-
-bool MotorDriver::query(int motor_index, int32_t request_type,
-                        int32_t * response_type, int32_t * value)
-{
-  if (motor_index < 0 || motor_index > 2 || servos_[motor_index] == nullptr) return false;
-
-  *response_type = request_type;   // mirror by default
-  *value = 0;
-
-  switch (QueryType(request_type)) {
-    case QUERY_ANGLE:
-      *value = static_cast<int32_t>(query_angle(motor_index));
-      return true;
-    case QUERY_VOLTAGE:
-      *value = static_cast<int32_t>(queryVoltage(motor_index));
-      return true;
-    case QUERY_CURRENT:
-      *value = static_cast<int32_t>(queryCurrent(motor_index));
-      return true;
-    case QUERY_POWER:
-      *value = static_cast<int32_t>(queryPower(motor_index));
-      return true;
-    case QUERY_TEMPERATURE:
-      *value = static_cast<int32_t>(queryTemperature(motor_index));
-      return true;
-    case QUERY_PING:
-    {
-      bool online = false;
-      *value = (ping(motor_index, &online)) ? 1 : 0;
-      return true;
-    }
-    default:
-      *response_type = -1;   // unknown request
-      return false;
-  }
 }
 
 // ---------------------------------------------------------------------------

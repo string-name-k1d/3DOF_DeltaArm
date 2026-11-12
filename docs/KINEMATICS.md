@@ -402,7 +402,7 @@ goal the IK accepted.
    radial. Solve the three planes → two candidate z, pick the downward one
    (the arm hangs below the plate).
 
-Result: `cur_pos`/`cur_angles` used by `apply()`/`get_pos` and the live
+Result: `cur_pos`/`cur_angles` used by `apply()`/`get_cur_pos()` and the live
 `arm/pos` stream.
 
 ---

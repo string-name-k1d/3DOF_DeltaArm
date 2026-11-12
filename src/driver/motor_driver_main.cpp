@@ -6,12 +6,10 @@
 #include "arm/motor_driver_node.hpp"
 
 /**
- * @brief Standalone motor-driver entry point.
+ * @brief Motor-driver entry point.
  *
- * Normally the driver is combined with the controller into the single-process
- * "arm_system" executable for tight coupling. This standalone entry
- * point is provided for cases where you want to run the hardware driver on its
- * own (e.g. testing the driver against real servos, or a custom deployment).
+ * Runs the hardware driver as its own process. The controller is launched
+ * separately and talks to it over arm/motor_targets and arm/motor_feedback.
  */
 int main(int argc, char ** argv)
 {

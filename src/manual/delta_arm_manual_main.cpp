@@ -34,7 +34,7 @@ int getch_one()
  *   Z / X : target z +/-  (vertical, up / down)
  *   Q     : quit
  *
- * Current-position changes are printed by the node from the get_pos stream.
+ * Current-position changes are printed by the node from the arm/pos topic.
  */
 int main(int argc, char ** argv)
 {
@@ -44,10 +44,6 @@ int main(int argc, char ** argv)
   const double step = node->declare_parameter<double>("step", 0.01);
 
   auto spinner = std::thread([node]() { rclcpp::spin(node); });
-
-  // Give the executor a moment to start before requesting the position stream.
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  node->enable_position_streaming();
 
   std::printf("\nDelta-arm manual control (WASD + Z/X)\n");
   std::printf("  W/S : +/- y   A/D : -/+ x   Z/X : +/- z   Q : quit\n\n");

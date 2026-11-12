@@ -8,7 +8,6 @@
 
 #include "arm/msg/arm_feedback.hpp"
 #include "arm/msg/motor_targets.hpp"
-#include "arm/srv/motor_param_query.hpp"
 #include "arm/motor_driver.hpp"
 
 namespace DeltaArmDriverNode
@@ -18,8 +17,7 @@ namespace DeltaArmDriverNode
  * @brief Bridges ROS traffic to the physical FashionStart bus-servos.
  *
  *  * subscribes "arm/motor_targets"  -> applies joint angles to the motors
- *  * services  "arm/motor_param_query" -> generic hardware/param query
- *    (servo_id, request_type -> response_type, value)
+ *  * publishes  "arm/motor_feedback" -> measured joint angles + online/error
  */
 class MotorDriverNode : public rclcpp::Node
 {
@@ -29,15 +27,11 @@ public:
 private:
   void declareParams();
   void onMotorTargets(const arm::msg::MotorTargets::SharedPtr msg);
-  void onParamQuery(
-    const std::shared_ptr<arm::srv::MotorParamQuery::Request> request,
-    const std::shared_ptr<arm::srv::MotorParamQuery::Response> response);
   void publishFeedback();
   void handleServoFault(int index, int error_code);
 
   std::shared_ptr<DeltaArmDriver::MotorDriver> driver_;
   rclcpp::Subscription<arm::msg::MotorTargets>::SharedPtr target_sub_;
-  rclcpp::Service<arm::srv::MotorParamQuery>::SharedPtr query_srv_;
   rclcpp::Publisher<arm::msg::ArmFeedback>::SharedPtr feedback_pub_;
   rclcpp::TimerBase::SharedPtr feedback_timer_;
 
@@ -47,11 +41,8 @@ private:
   int8_t error_[3];
   bool enable_motion_;
 
-  /// Input target topic. Default "arm/motor_targets": the controller applies
-  /// the control augmenter (offset/feedforward/clamp) to every message in
-  /// publishTargets() before publishing, so the driver consumes the already
-  /// augmented stream directly (see control_augmenter.hpp). The parameter
-  /// exists for external controllers that publish elsewhere.
+  /// Input target topic. Default "arm/motor_targets"; the parameter exists for
+  /// external controllers that publish elsewhere.
   std::string targets_topic_;
 
   // ── Feedback debounce ────────────────────────────────────────────────────
@@ -66,9 +57,8 @@ private:
   int offline_streak_ = 3;
 
   /// Guards all access to driver_ : the node runs on a MultiThreadedExecutor,
-  /// so the feedback timer and the motor-targets subscription / query service
-  /// may be called concurrently and must not touch the shared serial port at
-  /// the same time.
+  /// so the feedback timer and the motor-targets subscription may be called
+  /// concurrently and must not touch the shared serial port at the same time.
   std::mutex bus_mutex_;
 };
 

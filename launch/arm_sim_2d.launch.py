@@ -20,16 +20,14 @@
 #   params_file       arm parameter set to load ("config/arm_params.yaml"
 #                      default; point at config/arm_gen0_params.yaml for gen-0).
 #
-# The arm/endpoint/* topics (endpoint state + CoG / torque estimates) are now
-# published by arm_controller itself, so no separate endpoint node is launched.
-# In feedback-only mode (control:=false) no controller runs, hence no endpoint
-# topics - feedback visualisation is the whole point of that mode.
+# In feedback-only mode (control:=false) no controller runs; the window draws
+# the measured servo angles from arm/motor_feedback.
 
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.actions import GroupAction
+from launch.actions import GroupAction, Shutdown
 from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -59,8 +57,7 @@ def generate_launch_description():
                         'config/arm_params.yaml; use config/arm_gen0_params.yaml '
                         'for the gen-0 geometry.'),
 
-        # Virtual-sim controller (no motor driver): the two-in-one behaviour
-        # that arm_sim_2d.launch.py had before the motor/control args.
+        # Virtual-sim controller (no motor driver).
         Node(
             package='arm',
             executable='arm_controller',
@@ -68,6 +65,8 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file],
             condition=UnlessCondition(motor),
+            # A controller death must not leave the visualiser/launch running.
+            on_exit=Shutdown(reason='arm_controller exited'),
         ),
 
         # SFML 2D visualizer (always on - the window).
@@ -77,6 +76,9 @@ def generate_launch_description():
             name='arm_sim_sfml',
             output='screen',
             parameters=[params_file],
+            # Closing the window (or a display/preflight failure) ends the
+            # whole launch instead of leaving the controller running forever.
+            on_exit=Shutdown(reason='arm_sim_sfml exited'),
         ),
 
         # Motor mode, control ON: driver + controller so set_pos jogs the real
@@ -93,6 +95,7 @@ def generate_launch_description():
                             name='arm_motor_driver',
                             output='screen',
                             parameters=[params_file],
+                            on_exit=Shutdown(reason='arm_motor_driver exited'),
                         ),
                         Node(
                             package='arm',
@@ -100,6 +103,7 @@ def generate_launch_description():
                             name='arm_controller',
                             output='screen',
                             parameters=[params_file],
+                            on_exit=Shutdown(reason='arm_controller exited'),
                         ),
                     ],
                 ),
@@ -120,6 +124,7 @@ def generate_launch_description():
                             # "/**:" wildcard and LOSES to the arm_motor_driver
                             # block in params_file, leaving motion enabled.
                             parameters=[params_file, feedback_only_file],
+                            on_exit=Shutdown(reason='arm_motor_driver exited'),
                         ),
                     ],
                 ),

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Container launcher for the 3-DoF delta arm.
 #
-#   default            real hardware - controller + motor driver (arm_system)
+#   default            real hardware - controller + motor driver
 #   simulation         controller only (arm_controller); the arm simulation is
 #                      provided externally (e.g. the arm_gazebo package)
 #   <other args>       executed as a shell command (dev shell / builds)
@@ -35,5 +35,5 @@ if [ -n "${1:-}" ]; then
   exec "$@"
 fi
 
-echo "[arm] launching arm_system (real hardware)"
+echo "[arm] launching controller + motor driver (real hardware)"
 exec ros2 launch arm delta_arm.launch ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"}

@@ -10,3 +10,5 @@ log/
 # Temp build helper scripts
 build_arm.sh
 run_driver.sh
+
+.cache

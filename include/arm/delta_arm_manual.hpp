@@ -9,7 +9,6 @@
 
 #include "arm/action/set_position.hpp"
 #include "arm/msg/arm_position.hpp"
-#include "arm/srv/toggle_position_stream.hpp"
 
 namespace DeltaArmRos
 {
@@ -19,7 +18,6 @@ namespace DeltaArmRos
  *
  *  * Action-client to "arm/set_pos": remote controls the arm.
  *  * Subscribes "arm/pos" and prints current-position changes.
- *  * Enables the get_pos stream on startup so position feedback is available.
  *
  * The actual key decoding lives in the standalone main
  * (delta_arm_manual_main.cpp); this class exposes the ROS plumbing.
@@ -35,9 +33,6 @@ public:
   /// @brief Fire-and-forget a task-space target; replaces any in-flight goal.
   void send_target(double x, double y, double z);
 
-  /// @brief Ask the controller to stream "arm/pos" continuously.
-  void enable_position_streaming();
-
   /// Last position estimate received from the controller.
   std::atomic<double> pos_x_;
   std::atomic<double> pos_y_;
@@ -48,7 +43,6 @@ private:
 
   rclcpp_action::Client<SetPosition>::SharedPtr action_client_;
   rclcpp::Subscription<arm::msg::ArmPosition>::SharedPtr pos_sub_;
-  rclcpp::Client<arm::srv::TogglePositionStream>::SharedPtr toggle_client_;
 
   std::atomic<double> last_x_;
   std::atomic<double> last_y_;

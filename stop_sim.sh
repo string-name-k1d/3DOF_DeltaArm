@@ -70,7 +70,6 @@ set +e
 pkill -9 -x arm_controller
 pkill -9 -x arm_sim_sfml
 pkill -9 -x arm_manual
-pkill -9 -x arm_system
 pkill -9 -x arm_motor_driver
 pkill -9 -f "install/arm/lib/arm/arm_motor_driver"
 pkill -9 -f "install/arm/lib/arm/arm_sim_sfml"

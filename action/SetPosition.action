@@ -4,7 +4,7 @@
 #  set_pos action: sends a task-space target to the arm. A geometry_msgs/Twist
 #  is used as the goal payload (fixed-size 3D coordinate through linear.x/y/z).
 #
-#  The ROS 2 action server is exposed as:   delta_arm/set_pos
+#  The ROS 2 action server is exposed as:   arm/set_pos
 # ============================================================================
 ## Goal: desired end-effector position (meters)
 geometry_msgs/Twist target

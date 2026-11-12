@@ -2,7 +2,7 @@
 # Manual (WASD + Z/X) control terminal for the running arm simulation.
 #
 # Runs the arm_manual node connected to the arm controller that the arm_gazebo
-# launch started (action /arm/set_pos + position stream /arm/get_pos). Intended
+# launch started (action /arm/set_pos + position feedback /arm/pos). Intended
 # to be started inside an interactive container terminal (docker exec -it); the
 # run_arm.sh script auto-opens such a terminal ($TERMINAL_CMD, konsole,
 # gnome-terminal, alacritty, or Windows Terminal on WSL).

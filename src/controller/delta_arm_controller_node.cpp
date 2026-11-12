@@ -1,6 +1,5 @@
 #include "arm/delta_arm_controller.hpp"
 
-#include <array>
 #include <chrono>
 #include <functional>
 #include <vector>
@@ -8,34 +7,28 @@
 namespace DeltaArmRos {
 
 DeltaArmControllerNode::DeltaArmControllerNode(const rclcpp::NodeOptions& options)
-    : Node("arm_controller", options), feedback_rate_(20.0), feedback_frame_("base_link"), streaming_(false),
+    : Node("arm_controller", options), feedback_rate_(20.0), feedback_frame_("base_link"),
       simulate_arrival_(true), enable_motion_(true) {
     declareParams();
     setupActionServer();
-    setupGetPosition();
-    setupEmergencyStop();
-    setupEndpoint();
+    setupPositionFeedback();
 
-    RCLCPP_INFO(get_logger(), "arm_controller ready (set_pos action / get_pos streaming), state=%s",
-                ArmStateControl::toString(state_control_.getState()));
+    if (enable_motion_) {
+        RCLCPP_INFO(get_logger(), "arm_controller ready (set_pos action / arm/pos feedback)");
+    } else {
+        RCLCPP_INFO(get_logger(), "arm_controller ready (feedback only - set_pos action disabled)");
+    }
 }
 
 DeltaArmControllerNode::~DeltaArmControllerNode() {
     if (feedback_timer_) {
         feedback_timer_->cancel();
     }
-    if (control_state_timer_) {
-        control_state_timer_->cancel();
-    }
-    if (endpoint_timer_) {
-        endpoint_timer_->cancel();
-    }
 }
 
 void DeltaArmControllerNode::declareParams() {
     feedback_rate_ = declare_parameter<double>("feedback_rate", 20.0);
     feedback_frame_ = declare_parameter<std::string>("feedback_frame", "base_link");
-    endpoint_publish_rate_ = declare_parameter<double>("endpoint_publish_rate", 5.0);
 
     // Mechanism geometry (mm) - shared with the visualisers via arm_params.yaml.
     const double base_radius = declare_parameter<double>("geometry.base_radius", 100.0);
@@ -77,33 +70,6 @@ void DeltaArmControllerNode::declareParams() {
     enable_motion_ = declare_parameter<bool>("enable_motion", true);
     const auto initial =
         declare_parameter<std::vector<double>>("sim.initial_pos", std::vector<double>{0.0, 0.0, -0.30});
-
-    // Control-augmentation pipeline (see arm/control_augmenter.hpp): per-limb
-    // offset -> feedforward -> slew clamp, applied to every MotorTargets message
-    // published on arm/motor_targets. Identity by default (offsets zero, FF off,
-    // no slew clamp), so enabling the node never changes the robot on its own.
-    const auto offset_deg = declare_parameter<std::vector<double>>("offset_deg", std::vector<double>{0.0, 0.0, 0.0});
-    std::array<double, 3> offset{0.0, 0.0, 0.0};
-    for (size_t i = 0; i < 3 && i < offset_deg.size(); ++i) {
-        offset[i] = offset_deg[i];
-    }
-    const bool enable_feedforward = declare_parameter<bool>("enable_feedforward", false);
-    const double max_delta_deg = declare_parameter<double>("max_delta_deg", 0.0);
-    augmenter_.configure(offset, enable_feedforward, max_delta_deg);
-    RCLCPP_INFO(get_logger(), "control augmenter: offsets=[%.2f, %.2f, %.2f] deg, feedforward=%s, slew=%s", offset[0],
-                offset[1], offset[2], enable_feedforward ? "on" : "off", max_delta_deg > 0.0 ? "on" : "off");
-
-    // Control-state machine (see arm/arm_state_control.hpp): the safe home
-    // posture used when the arm returns home / after an estop release. The node
-    // boots in kHome, so goals are accepted until an estop latches kZeroEmergency.
-    const auto home_pos = declare_parameter<std::vector<double>>("control.home_pos", std::vector<double>{0.0, 0.0, -0.30});
-    std::array<double, 3> home{0.0, 0.0, -0.30};
-    for (size_t i = 0; i < 3 && i < home_pos.size(); ++i) {
-        home[i] = home_pos[i];
-    }
-    state_control_.configureHome(home);
-    RCLCPP_INFO(get_logger(), "arm control state: %s, home=(%.3f, %.3f, %.3f) m",
-                ArmStateControl::toString(state_control_.getState()), home[0], home[1], home[2]);
 
     std::vector<DeltaArm::ArmMechConfig> configs;
     constexpr double kTwoPiOver3 = 2.0943951023931953; // 120 deg
@@ -188,10 +154,6 @@ void DeltaArmControllerNode::declareParams() {
 
 void DeltaArmControllerNode::setupActionServer() {
     motor_pub_ = create_publisher<arm::msg::MotorTargets>("arm/motor_targets", 10);
-    auto control_state_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
-    control_state_pub_ = create_publisher<arm::msg::ControlState>("arm/control_state", control_state_qos);
-    publishControlState();
-    control_state_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() { publishControlState(); });
 
     if (!enable_motion_) {
         RCLCPP_INFO(get_logger(), "motion control DISABLED (enable_motion=false) - set_pos action not started");
@@ -205,88 +167,16 @@ void DeltaArmControllerNode::setupActionServer() {
         std::bind(&DeltaArmControllerNode::executeAction, this, std::placeholders::_1));
 }
 
-void DeltaArmControllerNode::setupGetPosition() {
+void DeltaArmControllerNode::setupPositionFeedback() {
     pos_pub_ = create_publisher<arm::msg::ArmPosition>("arm/pos", 10);
     // Separate debug topic for the joints (arm endpoint lives on arm/pos).
     joints_pub_ = create_publisher<sensor_msgs::msg::JointState>("arm/joints", 10);
 
-    toggle_srv_ = create_service<arm::srv::TogglePositionStream>(
-        "arm/get_pos", [this](const std::shared_ptr<arm::srv::TogglePositionStream::Request> req,
-                              const std::shared_ptr<arm::srv::TogglePositionStream::Response> resp) {
-            streaming_ = req->enable;
-            resp->success = true;
-            resp->streaming = streaming_;
-            RCLCPP_INFO(get_logger(), "get_pos streaming %s", streaming_ ? "ENABLED" : "disabled");
-        });
-
     const auto period =
         std::chrono::milliseconds(static_cast<int64_t>(1000.0 / (feedback_rate_ > 0.0 ? feedback_rate_ : 1.0)));
     feedback_timer_ = create_wall_timer(period, [this]() { publishPosition(); });
-}
 
-bool DeltaArmControllerNode::applyEmergencyStop(const std::string & reason) {
-    const bool changed = state_control_.activateEmergencyStop(reason);
-
-    if (current_goal_handle_ && current_goal_handle_->is_active()) {
-        auto res = std::make_shared<SetPosition::Result>();
-        res->succeeded = false;
-        res->message = "aborted by emergency stop";
-        current_goal_handle_->abort(res);
-        current_goal_handle_.reset();
-    }
-
-    augmenter_.reset();
-    arm_.stop();
-    const float zero[3] = {0.0f, 0.0f, 0.0f};
-    publishTargets(zero);
-    streaming_ = false;
-    publishControlState();
-
-    if (changed) {
-        RCLCPP_WARN(get_logger(), "EMERGENCY STOP - motors zeroed, actions halted, state=%s (%s)",
-                    ArmStateControl::toString(state_control_.getState()), reason.c_str());
-    } else {
-        RCLCPP_WARN(get_logger(), "EMERGENCY STOP refreshed while already active (%s)", reason.c_str());
-    }
-    return true;
-}
-
-bool DeltaArmControllerNode::releaseEmergencyStop(const std::string & reason) {
-    const bool changed = state_control_.releaseEmergencyStop(reason);
-    publishControlState();
-    if (changed) {
-        RCLCPP_INFO(get_logger(), "emergency stop released, state=%s (%s)",
-                    ArmStateControl::toString(state_control_.getState()), reason.c_str());
-    } else {
-        RCLCPP_INFO(get_logger(), "emergency stop release ignored (already inactive) (%s)", reason.c_str());
-    }
-    return true;
-}
-
-void DeltaArmControllerNode::setupEmergencyStop() {
-    estop_srv_ = create_service<arm::srv::EmergencyStop>(
-        "arm/emergency_stop", [this](const std::shared_ptr<arm::srv::EmergencyStop::Request> req,
-                                     const std::shared_ptr<arm::srv::EmergencyStop::Response> resp) {
-            const bool currently_active = state_control_.isEmergencyActive();
-            bool want_active = req->activate;
-            if (req->action == arm::srv::EmergencyStop::Request::ACTIVATE) {
-                want_active = true;
-            } else if (req->action == arm::srv::EmergencyStop::Request::RELEASE) {
-                want_active = false;
-            } else if (req->action == arm::srv::EmergencyStop::Request::TOGGLE) {
-                want_active = !currently_active;
-            }
-
-            if (want_active) {
-                applyEmergencyStop("arm/emergency_stop");
-            } else {
-                releaseEmergencyStop("arm/emergency_stop");
-            }
-
-            resp->success = true;
-            resp->emergency_active = state_control_.isEmergencyActive();
-            resp->state = resp->emergency_active ? ArmStateControl::toString(state_control_.getState()) : "inactive";
-        });
+    RCLCPP_INFO(get_logger(), "publishing arm/pos + arm/joints at %.1f Hz", feedback_rate_);
 }
 
 // ---------------------------------------------------------------------------
@@ -294,15 +184,7 @@ void DeltaArmControllerNode::setupEmergencyStop() {
 // ---------------------------------------------------------------------------
 rclcpp_action::GoalResponse DeltaArmControllerNode::handleGoal(const rclcpp_action::GoalUUID& /*uuid*/,
                                                                std::shared_ptr<const SetPosition::Goal> /*goal*/) {
-    if (!state_control_.acceptsGoals()) {
-        RCLCPP_WARN(get_logger(), "set_pos goal REJECTED - state is %s (%s)",
-                    ArmStateControl::toString(state_control_.getState()), state_control_.getLastReason().c_str());
-        return rclcpp_action::GoalResponse::REJECT;
-    }
-    state_control_.onGoalAccepted();
-    publishControlState();
-    RCLCPP_INFO(get_logger(), "set_pos goal received - accepting (state=%s)",
-                ArmStateControl::toString(state_control_.getState()));
+    RCLCPP_INFO(get_logger(), "set_pos goal received - accepting");
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
 
@@ -357,8 +239,6 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
     feedback->current.z = cur.z;
     goal_handle->publish_feedback(feedback);
 
-    // TODO(user): track arrival (compare driver feedback against target, then
-    // finalize only once within tolerance). For now we accept immediately.
     auto result = std::make_shared<SetPosition::Result>();
     result->succeeded = true;
     result->message = "target accepted and forwarded to driver";
@@ -369,7 +249,7 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
 }
 
 // ---------------------------------------------------------------------------
-// get_pos / stream helpers
+// arm/pos + arm/joints feedback
 // ---------------------------------------------------------------------------
 void DeltaArmControllerNode::publishTargets(const float* angles) {
     auto msg = std::make_shared<arm::msg::MotorTargets>();
@@ -378,101 +258,10 @@ void DeltaArmControllerNode::publishTargets(const float* angles) {
     msg->angles[0] = angles[0];
     msg->angles[1] = angles[1];
     msg->angles[2] = angles[2];
-    motor_pub_->publish(augmenter_.augment(*msg));
-}
-
-void DeltaArmControllerNode::publishControlState() {
-    if (!control_state_pub_) {
-        return;
-    }
-
-    auto msg = std::make_shared<arm::msg::ControlState>();
-    msg->header.stamp = now();
-    msg->header.frame_id = feedback_frame_;
-    msg->state = ArmStateControl::toString(state_control_.getState());
-    msg->emergency_active = state_control_.isEmergencyActive();
-    msg->accepts_goals = state_control_.acceptsGoals();
-    msg->last_reason = state_control_.getLastReason();
-
-    const auto& home = state_control_.getHomePose();
-    msg->home_position[0] = static_cast<float>(home[0]);
-    msg->home_position[1] = static_cast<float>(home[1]);
-    msg->home_position[2] = static_cast<float>(home[2]);
-
-    const DeltaArm::Vec3 cur = arm_.get_cur_pos();
-    msg->current_position[0] = cur.x;
-    msg->current_position[1] = cur.y;
-    msg->current_position[2] = cur.z;
-
-    control_state_pub_->publish(*msg);
-}
-
-// ---------------------------------------------------------------------------
-// Terminal end-effector module (merged from the former arm_endpoint node)
-// ---------------------------------------------------------------------------
-void DeltaArmControllerNode::setupEndpoint() {
-    // Select the terminal module. Only "null" exists today; the factory falls
-    // back to it so a gripper/camera value degrades instead of crashing.
-    const std::string module_type = declare_parameter<std::string>("module_type", "null");
-    endpoint_module_ = EndpointModule::makeEndpointModule(module_type, *this);
-
-    endpoint_state_pub_ = create_publisher<arm::msg::EndpointState>("arm/endpoint/state", 10);
-    endpoint_cog_pub_ = create_publisher<arm::msg::CogEstimate>("arm/endpoint/cog_estimate", 10);
-    endpoint_torque_pub_ = create_publisher<arm::msg::TorqueEstimate>("arm/endpoint/torque_estimate", 10);
-
-    // Toggle the dummy connector / attach-detach a payload. `data: true` attaches.
-    endpoint_attach_srv_ = create_service<std_srvs::srv::SetBool>(
-        "arm/endpoint/attach", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> req,
-                                      std::shared_ptr<std_srvs::srv::SetBool::Response> resp) {
-            endpoint_module_->setConnectorConnected(req->data);
-            resp->success = true;
-            resp->message = endpoint_module_->connectorConnected() ? "payload attached" : "payload detached";
-            RCLCPP_INFO(get_logger(), "%s (connector_connected=%s)", resp->message.c_str(),
-                        endpoint_module_->connectorConnected() ? "true" : "false");
-            // Republish now so the effect is visible without waiting a cycle.
-            publishEndpoint();
-        });
-
-    const auto period = std::chrono::milliseconds(
-        static_cast<int64_t>(1000.0 / (endpoint_publish_rate_ > 0.0 ? endpoint_publish_rate_ : 1.0)));
-    endpoint_timer_ = create_wall_timer(period, [this]() { publishEndpoint(); });
-
-    RCLCPP_INFO(get_logger(), "endpoint module: %s (active=%s), publishing arm/endpoint/* at %.1f Hz",
-                endpoint_module_->type().c_str(), endpoint_module_->isActive() ? "yes" : "stub",
-                endpoint_publish_rate_);
-    publishEndpoint();
-}
-
-void DeltaArmControllerNode::publishEndpoint() {
-    if (!endpoint_module_) {
-        return;
-    }
-
-    const auto stamp = now();
-
-    arm::msg::EndpointState state_msg;
-    state_msg.header.stamp = stamp;
-    state_msg.header.frame_id = feedback_frame_;
-    endpoint_module_->fillEndpointState(state_msg);
-    endpoint_state_pub_->publish(state_msg);
-
-    arm::msg::CogEstimate cog_msg;
-    cog_msg.header.stamp = stamp;
-    cog_msg.header.frame_id = feedback_frame_;
-    endpoint_module_->fillCogEstimate(cog_msg);
-    endpoint_cog_pub_->publish(cog_msg);
-
-    arm::msg::TorqueEstimate torque_msg;
-    torque_msg.header.stamp = stamp;
-    torque_msg.header.frame_id = feedback_frame_;
-    endpoint_module_->fillTorqueEstimate(torque_msg);
-    endpoint_torque_pub_->publish(torque_msg);
+    motor_pub_->publish(*msg);
 }
 
 void DeltaArmControllerNode::publishPosition() {
-    if (!streaming_)
-        return;
-
     auto msg = std::make_shared<arm::msg::ArmPosition>();
     msg->header.stamp = now();
     msg->header.frame_id = feedback_frame_;
@@ -499,7 +288,7 @@ void DeltaArmControllerNode::publishPosition() {
 
     pos_pub_->publish(*msg);
 
-    // Debug-only joint state topic: current joint angles (degrees rad converted).
+    // Debug-only joint state topic: current joint angles (degrees converted).
     auto js = std::make_shared<sensor_msgs::msg::JointState>();
     js->header.stamp = now();
     js->header.frame_id = feedback_frame_;

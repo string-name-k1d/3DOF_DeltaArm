@@ -21,6 +21,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -29,6 +30,14 @@
 #include <SFML/Graphics.hpp>
 
 #include "arm/arm_sim_sfml.hpp"
+
+// Xlib must be included AFTER the ROS headers: it defines macros such as
+// None/Bool that collide with rclcpp enums. Drop the None macro afterwards so
+// it cannot leak into the rest of this translation unit.
+#if defined(ARM_SIM_HAVE_X11)
+#include <X11/Xlib.h>
+#undef None
+#endif
 
 // ── Numeric constants used for the derived joint geometry ────────────────────
 static constexpr float kSin120 = 0.8660254037844386f;   // √3/2
@@ -484,11 +493,45 @@ static void drawLinkage(sf::RenderWindow & w, const Geom & g, int limb, float ar
   }
 }
 
+// ── Display preflight ────────────────────────────────────────────────────────
+// SFML calls abort() when it cannot open the X display (it is not a catchable
+// exception), which used to look like a mysterious launch death. Check the
+// display up front so a headless/misconfigured container exits with an
+// actionable message; the launch file treats this as fatal and shuts the rest
+// of the stack down instead of leaving it running.
+static bool checkDisplay() {
+  const char * display = std::getenv("DISPLAY");
+  if (display == nullptr || display[0] == '\0') {
+    std::fprintf(stderr,
+      "[arm_sim_sfml] ERROR: no graphical display: DISPLAY is not set.\n"
+      "[arm_sim_sfml] The 2-D view needs an X server. Run it from a desktop\n"
+      "[arm_sim_sfml] session or through scripts/launch_container.sh (which\n"
+      "[arm_sim_sfml] forwards DISPLAY/XAUTHORITY), or use the headless launch:\n"
+      "[arm_sim_sfml]   ros2 launch arm delta_arm.launch simulation:=true\n");
+    return false;
+  }
+#if defined(ARM_SIM_HAVE_X11)
+  Display * xdisplay = XOpenDisplay(nullptr);
+  if (xdisplay == nullptr) {
+    std::fprintf(stderr,
+      "[arm_sim_sfml] ERROR: cannot connect to X display '%s'.\n"
+      "[arm_sim_sfml] Check that the X socket and cookie are available to the\n"
+      "[arm_sim_sfml] container (DISPLAY, /tmp/.X11-unix, XAUTHORITY). The host\n"
+      "[arm_sim_sfml] helper scripts/launch_container.sh sets these up.\n",
+      display);
+    return false;
+  }
+  XCloseDisplay(xdisplay);
+#endif
+  return true;
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 int main(int argc, char **argv) {
+  if (!checkDisplay()) return 1;
+
   rclcpp::init(argc, argv);
   auto node = std::make_shared<DeltaArmSim::ArmSimSFMLNode>();
-  node->enable_position_streaming();
 
   const Geom geom = loadGeometry(*node);
   const double step = node->declare_parameter<double>("step", 0.01);
@@ -546,7 +589,10 @@ int main(int argc, char **argv) {
     sf::Color(80, 130, 255)};  // blue
   std::string limbName[3] = {"leg 0", "leg 1", "leg 2"};
 
-  while (window.isOpen()) {
+  // Also stop rendering when ROS shuts down (Ctrl-C in `ros2 launch` sends
+  // SIGINT to the node): otherwise the window would keep the launch alive
+  // until it is closed by hand.
+  while (window.isOpen() && rclcpp::ok()) {
     sf::Event event;
     while (window.pollEvent(event)) {
       if (event.type == sf::Event::Closed) {

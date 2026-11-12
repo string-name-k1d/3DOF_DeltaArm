@@ -14,7 +14,7 @@ Launches:
     into the three cmd_pos topics (radians) the joint servos follow. Only
     launched for the delta_arm payload.
   * the arm controller (simulation mode - no motor driver), which exposes the
-    set_pos action / get_pos streaming on the standard /arm topics. Only
+    set_pos action / arm/pos feedback on the standard /arm topics. Only
     launched for the delta_arm payload.
   * mount_welder (mount:=true): at runtime welds the payload onto the drone's
     base_link with a fixed joint (see scripts/mount_welder.py) — the "arm

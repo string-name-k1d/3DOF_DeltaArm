@@ -10,8 +10,8 @@
 # still subscribes to arm/motor_targets.
 #
 # enable_motion: false -> the arm/motor_targets subscription is never started,
-# so no MotorTargets message can ever reach the servos. Feedback, telemetry and
-# the arm/motor_param_query service stay live so the arm can still be observed.
+# so no MotorTargets message can ever reach the servos. Position feedback stays
+# live on arm/motor_feedback so the arm can still be observed.
 arm_motor_driver:
   ros__parameters:
     enable_motion: false

@@ -4,10 +4,10 @@
 
   Launches the arm controller together with the manual-control node, which
   publishes set_pos action goals from WASD / Z-X keys and prints current-position
-  changes (get_pos stream).
+  changes from the arm/pos topic.
 
   By default the controller runs in simulation mode (no motor driver) - set
-  simulation:=false to use the real hardware (controller + driver in-process).
+  simulation:=false to use the real hardware (controller + driver).
 
   Usage:
     ros2 launch arm manual.launch                     (simulation)
@@ -18,16 +18,13 @@
   <arg name="params_file"
        default="$(find-pkg-share arm)/config/arm_params.yaml"/>
 
-  <!-- Controller: real hardware = system (controller+driver); sim = controller.
-       The controller also publishes arm/endpoint/* itself. No name= on
-       arm_system: it hosts two nodes and launch name= would inject a
-       process-wide __node:= remap over all of them. -->
-  <node pkg="arm" exec="arm_system"
-        output="screen" unless="$(var simulation)">
+  <node pkg="arm" exec="arm_controller" name="arm_controller"
+        output="screen">
     <param from="$(var params_file)"/>
   </node>
-  <node pkg="arm" exec="arm_controller" name="arm_controller"
-        output="screen" if="$(var simulation)">
+
+  <node pkg="arm" exec="arm_motor_driver" name="arm_motor_driver"
+        output="screen" unless="$(var simulation)">
     <param from="$(var params_file)"/>
   </node>
 

@@ -114,10 +114,6 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
     }
 
     // ROS Start up
-    query_srv_ = create_service<arm::srv::MotorParamQuery>(
-        "arm/motor_param_query",
-        std::bind(&MotorDriverNode::onParamQuery, this, std::placeholders::_1, std::placeholders::_2));
-
     feedback_pub_ = create_publisher<arm::msg::ArmFeedback>("arm/motor_feedback", 10);
 
     const auto period =
@@ -126,8 +122,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
 
     RCLCPP_INFO(get_logger(),
                 "motor_driver ready (targets: %s, "
-                "feedback: arm/motor_feedback, "
-                "query: arm/motor_param_query)",
+                "feedback: arm/motor_feedback)",
                 targets_topic_.c_str());
 }
 
@@ -156,11 +151,9 @@ void MotorDriverNode::declareParams() {
     declare_parameter<double>("feedback_rate", 10.0);
     declare_parameter<std::string>("feedback_frame", "base_link");
 
-    // Input target topic. The controller publishes its IK result (already run
-    // through the control augmenter - offsets/feedforward/clamp are applied by
-    // publishTargets(), see control_augmenter.hpp) on "arm/motor_targets"; the
-    // driver consumes that stream directly. The parameter is kept for external
-    // controllers that publish elsewhere.
+    // Input target topic. The controller publishes its IK result on
+    // "arm/motor_targets"; the driver consumes that stream directly. The
+    // parameter is kept for external controllers that publish elsewhere.
     declare_parameter<std::string>("targets_topic", "arm/motor_targets");
     // Consecutive failed pings/queries before a servo is declared offline
     // (feedback debounce, see publishFeedback()).
@@ -171,23 +164,6 @@ void MotorDriverNode::onMotorTargets(const arm::msg::MotorTargets::SharedPtr msg
     float angles[3] = {msg->angles[0], msg->angles[1], msg->angles[2]};
     std::lock_guard<std::mutex> lock(bus_mutex_);
     driver_->set_target_angles(angles, 3);
-}
-
-void MotorDriverNode::onParamQuery(const std::shared_ptr<arm::srv::MotorParamQuery::Request> request,
-                                   const std::shared_ptr<arm::srv::MotorParamQuery::Response> response) {
-    response->response_type = request->request_type;
-    response->value = 0;
-    if (!driver_) {
-        response->success = false;
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "motor param query ignored - no serial device open");
-        return;
-    }
-    std::lock_guard<std::mutex> lock(bus_mutex_);
-    response->success =
-        driver_->query(request->servo_id, request->request_type, &response->response_type, &response->value);
-
-    RCLCPP_DEBUG(get_logger(), "query servo=%d type=%d -> response_type=%d value=%d success=%d", request->servo_id,
-                 request->request_type, response->response_type, response->value, int(response->success));
 }
 
 void MotorDriverNode::handleServoFault(int index, int error_code) {

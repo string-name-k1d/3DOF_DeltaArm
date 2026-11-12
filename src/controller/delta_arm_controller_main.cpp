@@ -6,13 +6,11 @@
 #include "arm/delta_arm_controller.hpp"
 
 /**
- * @brief Standalone controller entry point.
+ * @brief Controller entry point.
  *
- * Used by the "simulation" launch: runs ONLY the task-space controller node,
- * without touching the motor-driver / hardware. The arm simulation is provided
- * externally (another workspace/package) and talks to the controller over the
- * same topic/service/action names as in the real-hardware mode, so no code
- * changes are needed between simulation and hardware.
+ * Runs the task-space controller as its own process. It publishes motor
+ * targets for the separate driver node (or an external simulation) and
+ * exposes the same interfaces in both simulation and hardware mode.
  */
 int main(int argc, char ** argv)
 {
@@ -22,8 +20,7 @@ int main(int argc, char ** argv)
   auto executor = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   executor->add_node(controller);
 
-  RCLCPP_INFO(rclcpp::get_logger("arm_controller"),
-              "controller running (simulation mode - motor driver not started)");
+  RCLCPP_INFO(rclcpp::get_logger("arm_controller"), "controller running");
   executor->spin();
 
   rclcpp::shutdown();

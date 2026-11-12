@@ -23,7 +23,6 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(action_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 # Optional: SFML (2D visual simulator). Optional so the hardware/controller/
@@ -38,16 +37,6 @@ set(arm_msg_files
   "msg/ArmPosition.msg"
   "msg/ArmFeedback.msg"
   "msg/MotorTargets.msg"
-  "msg/ControlState.msg"
-  "msg/ArmHealth.msg"
-  "msg/EndpointState.msg"
-  "msg/CogEstimate.msg"
-  "msg/TorqueEstimate.msg"
-)
-set(arm_srv_files
-  "srv/TogglePositionStream.srv"
-  "srv/MotorParamQuery.srv"
-  "srv/EmergencyStop.srv"
 )
 set(arm_action_files
   "action/SetPosition.action"
@@ -55,10 +44,10 @@ set(arm_action_files
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${arm_msg_files}
-  ${arm_srv_files}
   ${arm_action_files}
   DEPENDENCIES std_msgs geometry_msgs action_msgs
 )
+
 # ---------------------------------------------------------------------------
 # FashionStart C++ serial-bus servo driver (git submodule). Builds the
 # "fsuartservo" and "cserialport" shared libraries from the checked-out
@@ -106,7 +95,7 @@ target_link_libraries(arm_lib fsuartservo)
 # the standard ROS deps. On Humble we use rosidl_get_typesupport_target.
 function(arm_link_ros TARGET)
   ament_target_dependencies(${TARGET}
-    rclcpp rclcpp_action std_msgs geometry_msgs action_msgs sensor_msgs std_srvs
+    rclcpp rclcpp_action std_msgs geometry_msgs action_msgs sensor_msgs
   )
   rosidl_get_typesupport_target(cpp_typesupport_target
     ${PROJECT_NAME} "rosidl_typesupport_cpp")
@@ -121,49 +110,23 @@ function(arm_ros_target TARGET)
   arm_link_ros(${TARGET})
 endfunction()
 
-# Single-process: controller + motor driver (real hardware, tight coupling).
-# The control augmenter is a logic-only class (src/system/control_augmenter.cpp)
-# folded into the controller node - it is applied to every published
-# MotorTargets message, so no separate relay node is needed.
-add_executable(arm_system
-  src/controller/delta_arm_controller_node.cpp
-  src/driver/motor_driver_node.cpp
-  src/system/arm_state_control.cpp
-  src/system/control_augmenter.cpp
-  src/system/endpoint_module.cpp
-  src/system/delta_arm_system_main.cpp
-)
-arm_ros_target(arm_system)
-target_link_libraries(arm_system arm_lib arm_kinematics)
-
-# Standalone controller (simulation / external driver). The logic-only control
-# augmenter (src/system/control_augmenter.cpp), the control-state machine
-# (src/system/arm_state_control.cpp) and the endpoint module
-# (src/system/endpoint_module.cpp) are compiled in here too, since the
-# controller node owns all three and publishes the arm/endpoint/* topics itself.
+# Task-space controller: set_pos action -> two-stage IK -> arm/motor_targets,
+# plus the continuous arm/pos + arm/joints feedback topics.
 add_executable(arm_controller
   src/controller/delta_arm_controller_node.cpp
   src/controller/delta_arm_controller_main.cpp
-  src/system/arm_state_control.cpp
-  src/system/control_augmenter.cpp
-  src/system/endpoint_module.cpp
 )
 arm_ros_target(arm_controller)
 target_link_libraries(arm_controller arm_kinematics)
 
-add_executable(arm_health_monitor
-  src/system/arm_health_monitor_node.cpp
-)
-arm_ros_target(arm_health_monitor)
-
-# Standalone motor driver.
+# Servo driver: arm/motor_targets -> FashionStar UART servos, publishing
+# arm/motor_feedback.
 add_executable(arm_motor_driver
-  src/driver/motor_driver.cpp
   src/driver/motor_driver_node.cpp
   src/driver/motor_driver_main.cpp
 )
 arm_ros_target(arm_motor_driver)
-target_link_libraries(arm_motor_driver fsuartservo)
+target_link_libraries(arm_motor_driver arm_lib)
 
 # Manual (WASD) control.
 add_executable(arm_manual
@@ -174,10 +137,9 @@ target_include_directories(arm_manual PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/includ
 arm_link_ros(arm_manual)
 
 # ---------------------------------------------------------------------------
-# Simulators (all OPTIONAL - never block the hardware/controller/driver build)
+# Simulator (OPTIONAL - never blocks the hardware/controller/driver build)
 # ---------------------------------------------------------------------------
-# SFML 2D visual simulator - built only when SFML is available AND the main
-# file is present (requires a display for visualization).
+# SFML 2D visual simulator - built only when SFML is available.
 if(SFML_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.cpp")
   add_executable(arm_sim_sfml
     src/sim/arm_sim_sfml.cpp
@@ -191,16 +153,16 @@ if(SFML_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.
     arm_kinematics
     sfml-graphics sfml-window sfml-system
   )
-endif()
 
-# ---------------------------------------------------------------------------
-# Arm-side connector (standalone, ROS-free library skeleton)
-# ---------------------------------------------------------------------------
-# Discover/transport/descriptor + the connector state machine for the pogo-pin
-# CAN link to an external actuator. Kept ROS-free and self-contained so it can
-# also be configured/built on its own:
-#   cmake -S arm/connector -B /tmp/arm_connector && cmake --build /tmp/arm_connector
-add_subdirectory(connector)
+  # Xlib preflight: SFML aborts the process when it cannot open the X display.
+  # Checking with XOpenDisplay first lets the node report a missing display or
+  # bad XAUTHORITY and exit cleanly instead (see arm_sim_sfml_main.cpp).
+  find_package(X11 QUIET)
+  if(X11_FOUND)
+    target_link_libraries(arm_sim_sfml X11::X11)
+    target_compile_definitions(arm_sim_sfml PRIVATE ARM_SIM_HAVE_X11=1)
+  endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # Install
@@ -209,11 +171,9 @@ install(TARGETS
   arm_lib
   cserialport
   fsuartservo
-  arm_system
   arm_controller
   arm_motor_driver
   arm_manual
-  arm_health_monitor
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

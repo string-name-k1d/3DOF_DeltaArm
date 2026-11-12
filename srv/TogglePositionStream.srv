@@ -1,8 +1,0 @@
-# Request/Response for toggling continuous "get_pos" publishing.
-# enable=true  -> controller publishes end-effector pose on "delta_arm/pos"
-#                 at the configured feedback_rate (Hz).
-# enable=false -> publishing stops.
-bool enable
----
-bool success
-bool streaming

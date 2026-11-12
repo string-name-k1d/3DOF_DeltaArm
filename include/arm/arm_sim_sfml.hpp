@@ -24,7 +24,7 @@ namespace DeltaArmSim
  *  * action-client to "arm/set_pos"  : forwards commanded targets;
  *  * subscribes "arm/pos"             : current position + motor angles.
  *
- * While a fresh, all-online "arm/motor_feedback" message is arriving, the
+ * While a fresh, all-online "arm/MotorFeedback" message is arriving, the
  * renderer instead draws the REAL machine: the three measured servo angles
  * (degrees, joint frame) drive the FK geometry, so the picture mirrors the
  * physical arm driven by the motor driver.
@@ -126,7 +126,7 @@ public:
   int fb_online_[3] = {0, 0, 0};
   int fb_error_[3] = {0, 0, 0};
 
-  /// True when a fresh, all-online "arm/motor_feedback" message arrived
+  /// True when a fresh, all-online "arm/MotorFeedback" message arrived
   /// recently; the renderer then draws the REAL machine instead of the sim
   /// stream (arm/pos).
   bool feedback_live() const;
@@ -134,7 +134,7 @@ public:
   // ── Anti-shake: source hysteresis + last-good latch + smoothing ─────────
   //
   // The drawn motor angles previously flipped every frame between the real
-  // servo readback (arm/motor_feedback) and the controller estimate (arm/pos)
+  // servo readback (arm/MotorFeedback) and the controller estimate (arm/pos)
   // whenever a single serial ping/query failed - the two disagree by the
   // servo install offsets, so the drawing visibly "shook" without any motion.
   // The selection is now sticky:

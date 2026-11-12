@@ -2,10 +2,10 @@
 # stop_sim.sh — stop any running arm simulation/controller processes (2-D SFML,
 # 3-D Gazebo or real-hardware stack) inside the container.
 #
-# Called automatically by the host ./run_arm.sh before each (re)launch so a
-# fresh launch never clashes on ROS node names (e.g. two /arm_controller nodes). Being
-# a script FILE (not an inline `bash -lc` command) keeps the "ros2 launch arm"
-# pkill pattern from matching this script's own command line.
+# Run this before relaunching so a fresh launch never clashes on ROS node
+# names (e.g. two /arm_controller nodes). Being a script FILE (not an inline
+# `bash -lc` command) keeps the "ros2 launch arm" pkill pattern from matching
+# this script's own command line.
 #
 # Usage (inside the container):
 #   bash /root/ros2_ws/src/arm/stop_sim.sh
@@ -15,12 +15,12 @@
 # --keep-gz: kill only the ARM stack, leave Gazebo itself (gzserver/gzclient)
 #   running. Required when attaching the arm to an already-running world (the
 #   drone's): otherwise this script kills the very server the arm is about to be
-#   spawned into, and run_arm.sh then fails its "is the world up?" precondition.
+#   spawned into.
 #
 # --watch PATTERN: block until no live process matches PATTERN, then run the
-#   normal teardown. run_arm.sh launches this detached so that CLOSING the
-#   simulation window shuts the whole stack down; without it the window process
-#   would exit while the controller, bridges and Gazebo server stayed orphaned.
+#   normal teardown. Launch it detached to treat CLOSING the simulation window
+#   as a full-stack shutdown; otherwise the window process exits while the
+#   controller, bridges and Gazebo server stay orphaned.
 
 KEEP_GZ=0
 WATCH=""
@@ -97,8 +97,8 @@ sleep 1
 # ros2 launch wrapper processes left behind by the above (child death makes
 # them exit on their own, but kill them anyway so the DDS graph goes quiet).
 pkill -9 -f "ros2 launch arm"
-pkill -9 -f "arm_sim_2d.launch.py"
-pkill -9 -f "arm_gazebo.launch.py"
+pkill -9 -f "sim_2d.launch.py"
+pkill -9 -f "sim_3d.launch.py"
 pkill -9 -f "arm_sim_sfml --ros-args"
 sleep 1
 

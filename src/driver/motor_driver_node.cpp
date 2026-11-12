@@ -114,7 +114,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
     }
 
     // ROS Start up
-    feedback_pub_ = create_publisher<arm::msg::ArmFeedback>("arm/motor_feedback", 10);
+    feedback_pub_ = create_publisher<arm::msg::ArmFeedback>("arm/MotorFeedback", 10);
 
     const auto period =
         std::chrono::milliseconds(static_cast<int64_t>(1000.0 / (feedback_rate_ > 0.0 ? feedback_rate_ : 1.0)));
@@ -122,7 +122,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
 
     RCLCPP_INFO(get_logger(),
                 "motor_driver ready (targets: %s, "
-                "feedback: arm/motor_feedback)",
+                "feedback: arm/MotorFeedback)",
                 targets_topic_.c_str());
 }
 

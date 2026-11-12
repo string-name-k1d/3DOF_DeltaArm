@@ -16,14 +16,14 @@ ArmSimSFMLNode::ArmSimSFMLNode(const rclcpp::NodeOptions & options)
     [this](const arm::msg::ArmPosition::SharedPtr msg) { onPosition(msg); });
 
   fb_sub_ = create_subscription<arm::msg::ArmFeedback>(
-    "arm/motor_feedback", 10,
+    "arm/MotorFeedback", 10,
     [this](const arm::msg::ArmFeedback::SharedPtr msg) { onFeedback(msg); });
 
   configureKinematics();
 
   RCLCPP_INFO(get_logger(),
               "ArmSim SFML node started - sending arm/set_pos goals, drawing "
-              "arm/pos feedback; real arm/motor_feedback overrides the view");
+              "arm/pos feedback; real arm/MotorFeedback overrides the view");
 }
 
 // Read the shared geometry.* parameters (the same ones the controller reads) and
@@ -125,7 +125,13 @@ void ArmSimSFMLNode::send_target(double x, double y, double z)
         return;
       }
       // res is null for a cancelled/abandoned goal, so do not dereference it.
-      last_rejection_ = (!res || res->message.empty()) ? "set_pos goal was not accepted" : res->message;
+      if (!res) {
+        last_rejection_ = "set_pos goal was not accepted";
+      } else if (res->status == SetPosition::Result::STATUS_UNREACHABLE) {
+        last_rejection_ = "target outside the reachable envelope";
+      } else {
+        last_rejection_ = "set_pos rejected (status " + std::to_string(res->status) + ")";
+      }
       RCLCPP_WARN(get_logger(), "set_pos goal REFUSED: %s", last_rejection_.c_str());
     };
   action_client_->async_send_goal(goal, opts);

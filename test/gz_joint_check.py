@@ -62,7 +62,11 @@ class C(Node):
         r = rf.result()
         if r is None:
             return "NO_RESULT", ""
-        return ("OK" if r.result.succeeded else "REFUSED"), r.result.message
+        if r.result.status == SetPosition.Result.STATUS_OK:
+            return "OK", ""
+        if r.result.status == SetPosition.Result.STATUS_UNREACHABLE:
+            return "REFUSED", "target outside reachable envelope"
+        return "REFUSED", f"status {r.result.status}"
 
     def settle(self, secs=12.0):
         end = time.time() + secs

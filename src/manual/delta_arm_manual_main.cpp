@@ -1,5 +1,9 @@
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdio>
 #include <thread>
+#include <utility>
 
 #include "rclcpp/rclcpp.hpp"
 
@@ -8,9 +12,20 @@
 namespace
 {
 
-// Single-character keyboard read (blocking). POSIX uses a raw termios so each
-// keypress is returned immediately without requiring Enter; Windows falls back
-// to _getch().
+using Vec3 = std::array<double, 3>;
+
+// Unit task-space displacement for each keyboard direction.
+const std::array<std::pair<char, Vec3>, 6> kKeyDirections{{
+  {'w', {0.0, 1.0, 0.0}},
+  {'s', {0.0, -1.0, 0.0}},
+  {'a', {-1.0, 0.0, 0.0}},
+  {'d', {1.0, 0.0, 0.0}},
+  {'z', {0.0, 0.0, 1.0}},
+  {'x', {0.0, 0.0, -1.0}},
+}};
+
+// Single-character keyboard read (blocking). POSIX uses stdio; Windows falls
+// back to _getch().
 int getch_one()
 {
 #if defined(_WIN32)
@@ -49,31 +64,20 @@ int main(int argc, char ** argv)
   std::printf("  W/S : +/- y   A/D : -/+ x   Z/X : +/- z   Q : quit\n\n");
   std::fflush(stdout);
 
-  double tx = 0.0, ty = 0.0, tz = 0.0;
-
-  bool running = true;
-  while (running && rclcpp::ok()) {
+  while (rclcpp::ok()) {
     const int key = getch_one();
-    switch (key) {
-      case 'w': case 'W':
-        ty += step; break;
-      case 's': case 'S':
-        ty -= step; break;
-      case 'a': case 'A':
-        tx -= step; break;
-      case 'd': case 'D':
-        tx += step; break;
-      case 'z': case 'Z':
-        tz += step; break;
-      case 'x': case 'X':
-        tz -= step; break;
-      case 'q': case 'Q':
-        running = false;
-        continue;
-      default:
-        continue;
-    }
-    node->send_target(tx, ty, tz);
+    if (key == -1) break;
+
+    const char lower = static_cast<char>(std::tolower(static_cast<unsigned char>(key)));
+    if (lower == 'q') break;
+
+    const auto it = std::find_if(
+      kKeyDirections.begin(), kKeyDirections.end(),
+      [lower](const auto & entry) { return entry.first == lower; });
+    if (it == kKeyDirections.end()) continue;
+
+    const Vec3 & direction = it->second;
+    node->shift_target({direction[0] * step, direction[1] * step, direction[2] * step});
   }
 
   rclcpp::shutdown();

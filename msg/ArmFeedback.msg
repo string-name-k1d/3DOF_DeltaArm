@@ -1,5 +1,5 @@
 # Motor-driver feedback on the servo bus, published by the motor-driver node on
-# topic "arm/motor_feedback" at the configured rate.
+# topic "arm/MotorFeedback" at the configured rate.
 #
 # Carries the measured (not just commanded) joint angle of each servo plus
 # status/telemetry so a monitor, the controller, or an operator can verify the

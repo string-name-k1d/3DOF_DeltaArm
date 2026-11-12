@@ -7,8 +7,9 @@
 #
 # Run from the host (outside the container), from anywhere:
 #
-#   scripts/launch_container.sh                 # run_arm.sh simulation + bash
-#   scripts/launch_container.sh --hardware      # hardware stack (USB) + bash
+#   scripts/launch_container.sh                 # real hardware + 2-D reference, control ON
+#   scripts/launch_container.sh --sim           # fake 2-D simulation, control ON
+#   scripts/launch_container.sh --hardware      # explicit hardware service (USB)
 #   scripts/launch_container.sh --foreground    # run_arm.sh in front; bash afterwards
 #   scripts/launch_container.sh -- <run_arm.sh args...>
 #
@@ -17,26 +18,28 @@
 # shell stops the container and the background launch.
 #
 # The host X11 display is forwarded (DISPLAY, /tmp/.X11-unix, XAUTHORITY) when
-# available, so `ros2 launch arm arm_sim_2d.launch.py` opens its window from
-# inside the container. Headless hosts still work: only the window is affected.
+# available, so `ros2 launch arm sim_2d.launch.py` opens its window from
+# inside the container. On a headless host choose a non-2-D mode explicitly,
+# e.g. `scripts/launch_container.sh -- simulation`.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-SERVICE=arm
+SERVICE=arm-hardware
 FOREGROUND=0
 ARGS_GIVEN=0
 RUN_ARGS=()
 
 usage() {
-  sed -n '3,21p' "$BASH_SOURCE" | sed -e 's/^# \{0,1\}//'
+  sed -n '3,18p' "$BASH_SOURCE" | sed -e 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -H|--hardware)   SERVICE=arm-hardware; shift ;;
+    -s|--sim)        SERVICE=arm; shift ;;
     -f|--foreground) FOREGROUND=1; shift ;;
     -h|--help)       usage; exit 0 ;;
     --)              shift; RUN_ARGS+=("$@"); ARGS_GIVEN=1; break ;;
@@ -49,14 +52,15 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# Defaults when no explicit run_arm.sh arguments were given: the plain `arm`
-# service runs the controller-only simulation (safe without the servo
-# adapter); `--hardware` runs the normal hardware launch.
+# Defaults when no explicit run_arm.sh arguments were given. The hardware
+# service uses run_arm.sh's own default (real hardware + 2-D reference, control
+# on); the plain `arm` service drops the motor driver (safe without the USB
+# adapter) but keeps the same 2-D reference view.
 if [ "$ARGS_GIVEN" = "0" ]; then
   if [ "$SERVICE" = "arm-hardware" ]; then
     RUN_ARGS=()
   else
-    RUN_ARGS=(simulation)
+    RUN_ARGS=(2d driver:=false)
   fi
 fi
 
@@ -97,7 +101,7 @@ fi
 
 echo "[launch] container service: $SERVICE"
 if [ ${#RUN_ARGS[@]} -eq 0 ]; then
-  echo "[launch] run_arm.sh (hardware launch)"
+  echo "[launch] run_arm.sh (real hardware + 2-D reference, control on)"
 else
   echo "[launch] run_arm.sh ${RUN_ARGS[*]}"
 fi

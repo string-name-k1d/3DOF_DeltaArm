@@ -3,21 +3,17 @@
 #
 # Same structure as arm_params.yaml; only the mechanism geometry differs. Select
 # it at launch time instead of the default set, e.g.:
-#   ros2 launch arm arm_sim_2d.launch.py params_file:=$(ros2 pkg prefix arm)/share/arm/config/arm_gen0_params.yaml
-# or, via the host launcher:
-#   ./scripts/run_arm.sh --params gen0
+#   ros2 launch arm sim_2d.launch.py params_file:=$(ros2 pkg prefix arm)/share/arm/config/arm_gen0_params.yaml
+# or, through the container entrypoint:
+#   ARM_PARAMS_FILE=/root/ws/config/arm_gen0_params.yaml ./run_arm.sh 2d
 # ============================================================================
 
 arm_controller:
   ros__parameters:
-    # feedback_rate: continuous arm/pos + arm/joints publish rate (Hz).
+    # feedback_rate: continuous arm/pos publish rate (Hz).
     feedback_rate: 20.0
     # feedback_frame: coordinate frame attached to the published messages.
     feedback_frame: "base_link"
-    # enable_motion: enable task-space motion. When false the set_pos action
-    #   server is NOT started, so no motor_targets can ever be produced
-    #   (feedback-only run).
-    enable_motion: true
 
 # ============================================================================
 # Shared delta-arm mechanism geometry (read by BOTH the controller kinematics
@@ -136,10 +132,6 @@ arm_motor_driver:
     max_speed: 100.0
     # auto_init: whether the driver should ping + sync the servos at startup.
     auto_init: true
-    # enable_motion: enable motor actuation. When false the arm/motor_targets
-    #   subscription is NOT started, so the servos can never be commanded to
-    #   move (feedback-only run; ping/position feedback still work).
-    enable_motion: true
     # targets_topic: topic carrying the motor-angle commands this driver
     #   consumes. The controller publishes its IK output on
     #   arm/motor_targets — keep this at the default.

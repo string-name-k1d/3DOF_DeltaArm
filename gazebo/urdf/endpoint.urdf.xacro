@@ -3,7 +3,7 @@
   endpoint.urdf.xacro — SIMPLIFIED payload for the "endpoint-only" attached
   simulator. Replaces the full 3-DoF delta mechanism with a rigid stand-in
   that carries ONLY the two frames that matter for the combined drone+arm
-  system (world: the PX4 drone's apriltag1, run under `./sim.sh single`):
+  system (world: the PX4 drone's apriltag1 world):
 
       base_link   (what the runtime weld attaches to the drone)
       tool0       (the arm's payload-carrying point, fixed BELOW base)
@@ -22,9 +22,10 @@
   joints driven by JointPositionController to make the endpoint positionable —
   still with NO closed-loop kinematics, so IK-free.
 
-  Run this payload with single mode and endpoint payload (./sim.sh single,
-see README), or set ARM_PAYLOAD=endpoint before run_arm.sh with view 3d and
-attach mode; the arm connects via the mount weld (launch/mount_welder.py).
+  Run this payload with the 3-D launch in attach mode:
+      ros2 launch arm_gazebo sim_3d.launch.py payload:=endpoint \
+          use_existing_gz:=true world_name:=apriltag1 mount:=true
+  The arm connects via the mount weld (see gazebo/scripts/mount_welder.py).
 -->
 <robot name="delta_arm_endpoint" xmlns:xacro="http://www.ros.org/wiki/xacro">
 

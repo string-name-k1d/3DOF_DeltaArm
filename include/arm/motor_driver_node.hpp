@@ -17,7 +17,7 @@ namespace DeltaArmDriverNode
  * @brief Bridges ROS traffic to the physical FashionStart bus-servos.
  *
  *  * subscribes "arm/motor_targets"  -> applies joint angles to the motors
- *  * publishes  "arm/motor_feedback" -> measured joint angles + online/error
+ *  * publishes  "arm/MotorFeedback" -> measured joint angles + online/error
  */
 class MotorDriverNode : public rclcpp::Node
 {

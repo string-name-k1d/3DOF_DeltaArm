@@ -62,10 +62,11 @@ set(FSUS_INC
 )
 
 # ---------------------------------------------------------------------------
-# Kinematics library (ROS-neutral). Exported so the separate arm_gazebo
-# package can re-use DeltaArm::Arm without recompiling the IK source.
+# Kinematics library (ROS-neutral). The implementation lives with the
+# controller sources; exported so the separate arm_gazebo package can re-use
+# DeltaArm::Arm without recompiling the IK source.
 # ---------------------------------------------------------------------------
-add_library(arm_kinematics SHARED src/axis/delta-arm.cpp)
+add_library(arm_kinematics SHARED src/controller/delta-arm_dynamics.cpp)
 target_include_directories(arm_kinematics PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
@@ -111,7 +112,7 @@ function(arm_ros_target TARGET)
 endfunction()
 
 # Task-space controller: set_pos action -> two-stage IK -> arm/motor_targets,
-# plus the continuous arm/pos + arm/joints feedback topics.
+# plus the continuous arm/pos topic (arm/joints is an optional 2-D debug stream).
 add_executable(arm_controller
   src/controller/delta_arm_controller_node.cpp
   src/controller/delta_arm_controller_main.cpp
@@ -120,7 +121,7 @@ arm_ros_target(arm_controller)
 target_link_libraries(arm_controller arm_kinematics)
 
 # Servo driver: arm/motor_targets -> FashionStar UART servos, publishing
-# arm/motor_feedback.
+# arm/MotorFeedback.
 add_executable(arm_motor_driver
   src/driver/motor_driver_node.cpp
   src/driver/motor_driver_main.cpp

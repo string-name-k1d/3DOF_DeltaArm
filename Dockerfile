@@ -61,8 +61,8 @@ RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
 WORKDIR /root
 
 # Container launcher (see run_arm.sh):
-#   * real hardware by default (controller + motor driver)
-#   * "simulation" as the first argument runs the controller only
+#   * no args: real hardware + 2-D reference view, control ON
+#   * "hardware", "simulation"/"fake", "sim2d", "sim3d", "manual" select bringups
 #   * any other argument(s) are executed as a shell command (dev shell/build)
 COPY run_arm.sh /root/run_arm.sh
 RUN chmod +x /root/run_arm.sh

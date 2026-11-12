@@ -506,8 +506,9 @@ static bool checkDisplay() {
       "[arm_sim_sfml] ERROR: no graphical display: DISPLAY is not set.\n"
       "[arm_sim_sfml] The 2-D view needs an X server. Run it from a desktop\n"
       "[arm_sim_sfml] session or through scripts/launch_container.sh (which\n"
-      "[arm_sim_sfml] forwards DISPLAY/XAUTHORITY), or use the headless launch:\n"
-      "[arm_sim_sfml]   ros2 launch arm delta_arm.launch simulation:=true\n");
+      "[arm_sim_sfml] forwards DISPLAY/XAUTHORITY), or use a headless launch:\n"
+      "[arm_sim_sfml]   ros2 launch arm hardware.launch.py driver:=false\n"
+      "[arm_sim_sfml]   ros2 launch arm_gazebo sim_3d.launch.py\n");
     return false;
   }
 #if defined(ARM_SIM_HAVE_X11)
@@ -625,7 +626,7 @@ int main(int argc, char **argv) {
                sf::Color(160, 160, 160));
       drawText(window, sf::Vector2f(10, 30),
                node->feedback_source_active()
-                 ? "SOURCE: real servo feedback (arm/motor_feedback)"
+                 ? "SOURCE: real servo feedback (arm/MotorFeedback)"
                  : "SOURCE: sim stream (arm/pos)",
                font, 13,
                node->feedback_source_active() ? sf::Color(120, 220, 120) : sf::Color(210, 200, 130));

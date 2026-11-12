@@ -17,7 +17,7 @@
       loop in the physics engine.
 
   The joint numbers / mount-frame convention are IDENTICAL to the old Gazebo
-  Classic world descriptor and to the FK in arm/src/axis/delta-arm.cpp:
+  Classic world descriptor and to the FK in arm/src/controller/delta-arm_dynamics.cpp:
 
     * leg i sits at radius base_radius, its plane rotated by yaw (0/120/240);
       shoulder axis is +X of the mount frame; at joint angle 0 the upper arm
@@ -41,7 +41,7 @@
 
   <!-- ==================== PARAMETERS ==================== -->
   <!-- Geometry is driven by the SAME mechanism parameters as the 2-D simulator
-       (config/arm_params.yaml -> "geometry", mm -> m). arm_gazebo.launch.py
+       (config/arm_params.yaml -> "geometry", mm -> m). sim_3d.launch.py
        reads the selected params file and passes these as xacro args, so the
        Gazebo model tracks alternate sets (e.g. arm_gen0_params.yaml). The
        defaults below reproduce the original arm_params.yaml values. -->
@@ -91,7 +91,7 @@
     then OMITTED so that base_link is the payload's root with exactly ONE
     parent (the runtime arm_mount weld). mount=false = the standalone arm
     (arm_world / `both` mode), anchored at base_z above the origin by the
-    world link, as before. arm_gazebo.launch.py always passes mount explicitly.
+    world link, as before. sim_3d.launch.py always passes mount explicitly.
   -->
   <xacro:arg name="mount" default="false"/>
 

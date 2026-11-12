@@ -1,16 +1,23 @@
 #!/bin/bash
-# Container launcher for the 3-DoF delta arm.
+# Container entrypoint for the 3-DoF delta arm.
 #
-#   default            real hardware - controller + motor driver
-#   simulation         controller only (arm_controller); the arm simulation is
-#                      provided externally (e.g. the arm_gazebo package)
-#   <other args>       executed as a shell command (dev shell / builds)
+#   (no arguments)      real hardware + 2-D reference view, control ON
+#   hardware            real hardware: controller + motor driver, control ON
+#   fake / simulation   fake hardware: controller only, control ON
+#   2d / sim2d          2-D SFML view (driver:=true for real hardware)
+#   3d / sim3d          3-D Gazebo simulation
+#   manual              fake hardware + manual target-position node
+#   <other args>        executed as a shell command (dev shell / builds)
+#
+# Motion is ON by default; pass control:=false to observe only.
 #
 # Works in BOTH layouts:
-#   * standalone   : workspace mounted at /root/ws (repo root IS the arm package,
-#                    sees install/setup.bash in the current directory)
-#   * parent fyp   : sources mounted at /root/ros2_ws/src/arm (install at
-#                    /root/ros2_ws/install — the shared fyp_sim container)
+#   * standalone   : workspace mounted at /root/ws (repo root IS the arm package)
+#   * parent fyp   : sources mounted at /root/ros2_ws/src/arm
+#
+# Extra launch arguments passed after the mode are forwarded unchanged, e.g.:
+#   ./run_arm.sh 2d driver:=true control:=false
+#   ./run_arm.sh hardware control:=false
 
 set -e
 
@@ -21,19 +28,41 @@ elif [ -f install/setup.bash ]; then
   source install/setup.bash
 fi
 
-# Optional parameter-set override: ARM_PARAMS_FILE=/path/to/arm_gen0_params.yaml
-# selects an alternate geometry/config set (see arm/config/).
+# Optional parameter-set override (see arm/config/):
+#   ARM_PARAMS_FILE=/path/to/arm_gen0_params.yaml ./run_arm.sh 2d
 PARAMS_ARG=()
 [ -n "${ARM_PARAMS_FILE:-}" ] && PARAMS_ARG=(params_file:="$ARM_PARAMS_FILE")
 
-if [ "${1:-}" = "simulation" ]; then
-  echo "[arm] launching arm_controller (simulation mode - external arm sim expected)"
-  exec ros2 launch arm delta_arm.launch simulation:=true ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"}
+if [ $# -eq 0 ]; then
+  # Real hardware with the 2-D model reference; motion is on by default.
+  set -- 2d driver:=true
 fi
 
-if [ -n "${1:-}" ]; then
-  exec "$@"
-fi
+MODE="$1"
+shift
 
-echo "[arm] launching controller + motor driver (real hardware)"
-exec ros2 launch arm delta_arm.launch ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"}
+case "$MODE" in
+  hardware)
+    exec ros2 launch arm hardware.launch.py \
+      ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"} "$@"
+    ;;
+  fake|simulation)
+    exec ros2 launch arm hardware.launch.py driver:=false \
+      ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"} "$@"
+    ;;
+  2d|sim2d|sim-2d)
+    exec ros2 launch arm sim_2d.launch.py \
+      ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"} "$@"
+    ;;
+  3d|sim3d|sim-3d)
+    exec ros2 launch arm_gazebo sim_3d.launch.py \
+      ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"} "$@"
+    ;;
+  manual)
+    exec ros2 launch arm hardware.launch.py driver:=false manual:=true \
+      ${PARAMS_ARG[@]+"${PARAMS_ARG[@]}"} "$@"
+    ;;
+  *)
+    exec "$MODE" "$@"
+    ;;
+esac

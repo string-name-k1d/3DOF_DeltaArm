@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mount_welder.py — rigidly weld a spawned payload onto the drone at runtime.
 
-The "mount" step of the combined-mode single launcher ('./sim.sh single'):
+The "mount" step of the attach mode in sim_3d.launch.py:
 after the payload model (delta arm or endpoint) has been created INTO the
 drone's already-running Gazebo world, this node attaches it rigidly by
 posting a world-scope fixed <joint> SDF fragment to the gazebo server's
@@ -21,7 +21,7 @@ link with no other parent — a gz link can have exactly one parent joint, and
 the mount weld is that parent. delta_arm.urdf.xacro drops its fake `world`
 link when processed with mount=true; endpoint.urdf.xacro has none by design.
 
-Run manually (already wired into arm_gazebo.launch.py via mount:=true):
+Run manually (already wired into sim_3d.launch.py via mount:=true):
     ros2 run arm_gazebo mount_welder.py --world apriltag1 \
         --child-model delta_arm --offset-z -0.05
 """

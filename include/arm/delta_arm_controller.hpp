@@ -25,8 +25,9 @@ namespace DeltaArmRos
  *              Runs two-stage IK -> publishes motor targets for the driver.
  *  * pos     : "arm/pos" topic. Current pose, commanded target and the
  *              current/target motor angles, published continuously.
- *  * joints  : "arm/joints" topic (sensor_msgs/JointState) with the three
- *              motor angles in degrees.
+ *  * joints  : optional "arm/joints" debug topic (sensor_msgs/JointState)
+ *              with the three motor angles in degrees. Only published when
+ *              the 2-D visualiser requests it (publish_joints=true).
  */
 class DeltaArmControllerNode : public rclcpp::Node
 {
@@ -65,6 +66,7 @@ private:
   std::string feedback_frame_;
   bool simulate_arrival_;
   bool enable_motion_;
+  bool publish_joints_;
 };
 
 }  // namespace DeltaArmRos

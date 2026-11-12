@@ -1,6 +1,6 @@
 # Delta-Arm Kinematics
 
-This document describes the exact math implemented in `src/axis/delta-arm.cpp`
+This document describes the exact math implemented in `src/controller/delta-arm_dynamics.cpp`
 and mirrored in the SFML 2-D sim (`src/sim/arm_sim_sfml_main.cpp`), the 3-D
 Gazebo arm (`arm_gazebo`), and the controller's parameter set. All lengths are
 in **millimetres** internally (converted from the SI metres used by ROS
@@ -435,7 +435,7 @@ total, because they run on feedback from real hardware.
 
 The geometry/constants above are duplicated (by design, verified equal) in:
 
-- `src/axis/delta-arm.cpp` — `Arm::init_default_geometry()`;
+- `src/controller/delta-arm_dynamics.cpp` — `Arm::init_default_geometry()`;
 - `src/controller/delta_arm_controller_node.cpp` — `declareParams()`;
 - `config/arm_params.yaml`;
 - `gazebo/src/arm_cmd_bridge.cpp` — Gazebo 3-D cmd bridge.

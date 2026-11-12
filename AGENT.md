@@ -9,12 +9,12 @@ the repository root. When integrated as a submodule, it is mounted/copied into
 | Concern | Location |
 |---|---|
 | Interfaces | `action/SetPosition.action`, `msg/{ArmPosition,ArmFeedback,MotorTargets}.msg` |
-| Kinematics library | `src/axis/delta-arm.cpp`, `include/arm/delta_arm.hpp` |
+| Kinematics library | `src/controller/delta-arm_dynamics.cpp`, `include/arm/delta_arm.hpp` |
 | Controller node | `src/controller/`, `include/arm/delta_arm_controller.hpp` |
 | Servo driver | `src/driver/`, `include/arm/motor_driver*.hpp` |
 | Manual control | `src/manual/`, `include/arm/delta_arm_manual.hpp` |
 | SFML 2-D simulator | `src/sim/`, `include/arm/arm_sim_sfml.hpp` |
-| Launch / params | `launch/`, `config/` |
+| Launch / params | `launch/{sim_2d,hardware,manual}.launch.py` (shared `arm_bringup.launch.py`), `gazebo/launch/sim_3d.launch.py`, `config/` |
 | Unit tests | `test/test_delta_arm.cpp` |
 | FashionStar SDK (submodule) | `motor_driver/fashionstart-uart-servo/` |
 | Gazebo package (separate) | `gazebo/` |
@@ -49,8 +49,10 @@ window works on a desktop and headless runs still start.
 - Public headers live in `include/arm/` and are included as
   `#include "arm/<header>.hpp"`.
 - ROS names: `arm/set_pos` action, `arm/pos` feedback topic,
-  `arm/motor_targets` (controller → driver), `arm/motor_feedback`
-  (driver → consumers).
+  `arm/motor_targets` (controller → driver), `arm/MotorFeedback`
+  (driver → consumers), optional 2-D debug `arm/joints`.
+- `control:=true` is the launch default (`manual:=false`). `enable_motion` and
+  `publish_joints` are runtime launch parameters, never keys in `config/*.yaml`.
 
 ## Gazebo (`gazebo/` = `arm_gazebo`)
 

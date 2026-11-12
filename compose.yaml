@@ -5,13 +5,16 @@
 # whose FIRST ARGUMENT selects what runs:
 #
 #   docker compose build arm                 # build the image (once)
-#   docker compose run --rm arm simulation   # controller only (no USB needed)
+#   docker compose run --rm arm simulation   # fake hardware: controller only
+#   docker compose run --rm arm sim2d        # 2-D SFML simulation
+#   docker compose run --rm arm sim3d        # 3-D Gazebo simulation
 #   docker compose run --rm arm bash         # dev shell / build (no USB needed)
-#   docker compose run --rm arm-hardware     # REAL HARDWARE (controller + driver)
+#   docker compose run --rm arm-hardware     # real hardware + 2-D reference,
+#                                            # control ON (run_arm.sh default)
 #
 # The USB serial adapter is bound only by the `arm-hardware` service, so the
-# default `arm` service always starts - including on machines/CI where the
-# adapter is not plugged in. Override the host path for hardware with
+# default `arm` service starts without hardware and defaults to the fake 2-D
+# view. Override the host path for hardware with
 # SERIAL_DEVICE=/dev/ttyUSB2 docker compose run --rm arm-hardware ...
 
 x-arm-common: &arm-common
@@ -45,15 +48,18 @@ x-arm-common: &arm-common
 
 services:
   # Simulation / development. No host devices are required, so this service
-  # starts even when the servo adapter is absent.
+  # starts even when the servo adapter is absent. With no explicit command it
+  # opens the fake 2-D reference view with motion enabled.
   arm:
     <<: *arm-common
+    command: ["2d", "driver:=false"]
 
   # Real hardware: adds the FashionStar USB serial adapter. The "hardware"
   # profile keeps `docker compose up` from starting it; an explicit
   # `docker compose run --rm arm-hardware` still works.
   arm-hardware:
     <<: *arm-common
+    command: []
     profiles: ["hardware"]
     devices:
       - "${SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0"

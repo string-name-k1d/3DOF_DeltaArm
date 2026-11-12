@@ -143,7 +143,11 @@ class Sweep(Node):
         res = rfut.result()
         if res is None:
             return "NO_RESULT", ""
-        return ("OK" if res.result.succeeded else "REFUSED"), res.result.message
+        if res.result.status == SetPosition.Result.STATUS_OK:
+            return "OK", ""
+        if res.result.status == SetPosition.Result.STATUS_UNREACHABLE:
+            return "REFUSED", "target outside reachable envelope"
+        return "REFUSED", f"status {res.result.status}"
 
     def wait_reached(self, want, timeout=None):
         timeout = self.settle if timeout is None else timeout

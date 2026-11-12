@@ -8,7 +8,7 @@
     ArmPosition / MotorTargets / ArmFeedback messages, the two-stage
     inverse-kinematics controller node (set_pos action + arm/pos feedback
     topic), the FashionStart UART-servo motor driver (arm/motor_targets ->
-    arm/motor_feedback), and an optional 2-D SFML visualiser.
+    arm/MotorFeedback), and an optional 2-D SFML visualiser.
   </description>
   <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
   <license>Apache-2.0</license>

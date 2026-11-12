@@ -3,7 +3,7 @@
 # install_gazebo_harmonic.sh
 #
 # Optional add-on: installs the Gazebo Harmonic (gz-sim 8) closed-loop 3-D
-# simulation stack for the delta arm (the `--view 3d` path of run_arm.sh).
+# simulation stack for the delta arm (the `3d` path of run_arm.sh).
 #
 #     bash /root/ros2_ws/src/arm/scripts/install_gazebo_harmonic.sh
 #
@@ -14,7 +14,7 @@
 #   4. ros-humble-robot-state-publisher (URDF -> TF for the arm model)
 #
 # Note: gz-transport discovery inside the container needs GZ_IP
-# pinned to 127.0.0.1 -- run_arm.sh / arm_gazebo.launch.py already do this.
+# pinned to 127.0.0.1 -- run_arm.sh / sim_3d.launch.py already do this.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -74,4 +74,4 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   ros-humble-ros-gzharmonic \
   ros-humble-robot-state-publisher
 
-echo "[install_gazebo_harmonic] done. Use: ./run_arm.sh --view 3d"
+echo "[install_gazebo_harmonic] done. Use: ./run_arm.sh 3d"

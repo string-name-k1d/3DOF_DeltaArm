@@ -9,7 +9,9 @@ ManualControlNode::ManualControlNode(const rclcpp::NodeOptions & options)
   : Node("arm_manual_control", options),
     pos_x_(0.0), pos_y_(0.0), pos_z_(0.0),
     last_x_(0.0), last_y_(0.0), last_z_(0.0),
-    printed_once_(false)
+    printed_once_(false),
+    target_x_(0.0), target_y_(0.0), target_z_(0.0),
+    target_initialized_(false)
 {
   action_client_ = rclcpp_action::create_client<SetPosition>(this, "arm/set_pos");
 
@@ -20,8 +22,25 @@ ManualControlNode::ManualControlNode(const rclcpp::NodeOptions & options)
   RCLCPP_INFO(get_logger(), "arm_manual_control ready (waiting for set_pos server)");
 }
 
+void ManualControlNode::shift_target(const std::array<double, 3> & delta)
+{
+  if (!target_initialized_) {
+    target_x_ = pos_x_.load();
+    target_y_ = pos_y_.load();
+    target_z_ = pos_z_.load();
+    target_initialized_ = true;
+  }
+
+  send_target(target_x_ + delta[0], target_y_ + delta[1], target_z_ + delta[2]);
+}
+
 void ManualControlNode::send_target(double x, double y, double z)
 {
+  target_x_ = x;
+  target_y_ = y;
+  target_z_ = z;
+  target_initialized_ = true;
+
   if (!action_client_->wait_for_action_server(std::chrono::seconds(0))) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                          "set_pos action server not available yet");

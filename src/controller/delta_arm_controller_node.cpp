@@ -8,7 +8,7 @@ namespace DeltaArmRos {
 
 DeltaArmControllerNode::DeltaArmControllerNode(const rclcpp::NodeOptions& options)
     : Node("arm_controller", options), feedback_rate_(20.0), feedback_frame_("base_link"),
-      simulate_arrival_(true), enable_motion_(true) {
+      simulate_arrival_(true), enable_motion_(true), publish_joints_(false) {
     declareParams();
     setupActionServer();
     setupPositionFeedback();
@@ -67,7 +67,9 @@ void DeltaArmControllerNode::declareParams() {
     constexpr double kDegToRad = 0.017453292519943295;
 
     simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
+    // Runtime-only switches: launch files set these; config/*.yaml must not.
     enable_motion_ = declare_parameter<bool>("enable_motion", true);
+    publish_joints_ = declare_parameter<bool>("publish_joints", false);
     const auto initial =
         declare_parameter<std::vector<double>>("sim.initial_pos", std::vector<double>{0.0, 0.0, -0.30});
 
@@ -169,14 +171,18 @@ void DeltaArmControllerNode::setupActionServer() {
 
 void DeltaArmControllerNode::setupPositionFeedback() {
     pos_pub_ = create_publisher<arm::msg::ArmPosition>("arm/pos", 10);
-    // Separate debug topic for the joints (arm endpoint lives on arm/pos).
-    joints_pub_ = create_publisher<sensor_msgs::msg::JointState>("arm/joints", 10);
+    // Debug-only joint topic, requested by the 2-D visualiser. The endpoint
+    // lives on arm/pos; hardware/3-D runs do not need this extra stream.
+    if (publish_joints_) {
+        joints_pub_ = create_publisher<sensor_msgs::msg::JointState>("arm/joints", 10);
+    }
 
     const auto period =
         std::chrono::milliseconds(static_cast<int64_t>(1000.0 / (feedback_rate_ > 0.0 ? feedback_rate_ : 1.0)));
     feedback_timer_ = create_wall_timer(period, [this]() { publishPosition(); });
 
-    RCLCPP_INFO(get_logger(), "publishing arm/pos + arm/joints at %.1f Hz", feedback_rate_);
+    RCLCPP_INFO(get_logger(), "publishing arm/pos%s at %.1f Hz",
+                publish_joints_ ? " + arm/joints (2-D debug)" : "", feedback_rate_);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,8 +218,7 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
         // name the target so the caller can see WHICH pose was refused.
         RCLCPP_WARN(get_logger(), "set_pos REJECTED (%.3f, %.3f, %.3f) m: %s", x, y, z, reach.reason.c_str());
         auto result = std::make_shared<SetPosition::Result>();
-        result->succeeded = false;
-        result->message = std::string("target outside the reachable envelope: ") + reach.reason;
+        result->status = SetPosition::Result::STATUS_UNREACHABLE;
         goal_handle->abort(result);
 
         if (current_goal_handle_ == goal_handle)
@@ -240,8 +245,7 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
     goal_handle->publish_feedback(feedback);
 
     auto result = std::make_shared<SetPosition::Result>();
-    result->succeeded = true;
-    result->message = "target accepted and forwarded to driver";
+    result->status = SetPosition::Result::STATUS_OK;
     goal_handle->succeed(result);
 
     if (current_goal_handle_ == goal_handle)
@@ -249,7 +253,7 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
 }
 
 // ---------------------------------------------------------------------------
-// arm/pos + arm/joints feedback
+// arm/pos (+ optional arm/joints debug) feedback
 // ---------------------------------------------------------------------------
 void DeltaArmControllerNode::publishTargets(const float* angles) {
     auto msg = std::make_shared<arm::msg::MotorTargets>();
@@ -288,13 +292,15 @@ void DeltaArmControllerNode::publishPosition() {
 
     pos_pub_->publish(*msg);
 
-    // Debug-only joint state topic: current joint angles (degrees converted).
-    auto js = std::make_shared<sensor_msgs::msg::JointState>();
-    js->header.stamp = now();
-    js->header.frame_id = feedback_frame_;
-    js->name = {"joint_0", "joint_1", "joint_2"};
-    js->position = {cur_angles[0], cur_angles[1], cur_angles[2]};
-    joints_pub_->publish(*js);
+    // Debug-only joint state topic: current joint angles (degrees).
+    if (joints_pub_) {
+        auto js = std::make_shared<sensor_msgs::msg::JointState>();
+        js->header.stamp = now();
+        js->header.frame_id = feedback_frame_;
+        js->name = {"joint_0", "joint_1", "joint_2"};
+        js->position = {cur_angles[0], cur_angles[1], cur_angles[2]};
+        joints_pub_->publish(*js);
+    }
 }
 
 } // namespace DeltaArmRos

@@ -66,6 +66,8 @@ class C(Node):
             return "OK", ""
         if r.result.status == SetPosition.Result.STATUS_UNREACHABLE:
             return "REFUSED", "target outside reachable envelope"
+        if r.result.status == SetPosition.Result.STATUS_POS_NOT_REACHED:
+            return "NOT_REACHED", "target not reached within tolerance"
         return "REFUSED", f"status {r.result.status}"
 
     def settle(self, secs=12.0):

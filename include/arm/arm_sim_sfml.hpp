@@ -9,8 +9,8 @@
 
 #include "arm/action/set_position.hpp"
 #include "arm/delta_arm.hpp"
-#include "arm/msg/arm_feedback.hpp"
 #include "arm/msg/arm_position.hpp"
+#include "arm/msg/motor_feedback.hpp"
 
 namespace DeltaArmSim
 {
@@ -170,14 +170,14 @@ public:
 
 private:
   void onPosition(const arm::msg::ArmPosition::SharedPtr msg);
-  void onFeedback(const arm::msg::ArmFeedback::SharedPtr msg);
+  void onFeedback(const arm::msg::MotorFeedback::SharedPtr msg);
   /// @brief Read the shared geometry.* parameters and configure the kinematics
   ///        reference (same parameters the controller reads).
   void configureKinematics();
 
   rclcpp_action::Client<SetPosition>::SharedPtr action_client_;
   rclcpp::Subscription<arm::msg::ArmPosition>::SharedPtr pos_sub_;
-  rclcpp::Subscription<arm::msg::ArmFeedback>::SharedPtr fb_sub_;
+  rclcpp::Subscription<arm::msg::MotorFeedback>::SharedPtr fb_sub_;
 
   /// Kinematics reference used only to convert motor -> arm angles for drawing
   /// and to seed the initial posture. Holds no motion state of its own.

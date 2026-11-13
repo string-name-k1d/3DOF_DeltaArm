@@ -1,16 +1,21 @@
 #include "arm/delta_arm_controller.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <functional>
+#include <thread>
 #include <vector>
 
 namespace DeltaArmRos {
 
 DeltaArmControllerNode::DeltaArmControllerNode(const rclcpp::NodeOptions& options)
     : Node("arm_controller", options), feedback_rate_(20.0), feedback_frame_("base_link"),
-      simulate_arrival_(true), enable_motion_(true), publish_joints_(false) {
+      reach_tolerance_(0.005), reach_timeout_(10.0), simulate_arrival_(true),
+      enable_motion_(true), publish_joints_(false) {
+    action_cb_group_ = create_callback_group(rclcpp::CallbackGroupType::Reentrant);
     declareParams();
     setupActionServer();
+    setupMotorFeedback();
     setupPositionFeedback();
 
     if (enable_motion_) {
@@ -29,6 +34,8 @@ DeltaArmControllerNode::~DeltaArmControllerNode() {
 void DeltaArmControllerNode::declareParams() {
     feedback_rate_ = declare_parameter<double>("feedback_rate", 20.0);
     feedback_frame_ = declare_parameter<std::string>("feedback_frame", "base_link");
+    reach_tolerance_ = declare_parameter<double>("reach_tolerance", 0.005);
+    reach_timeout_ = declare_parameter<double>("reach_timeout", 10.0);
 
     // Mechanism geometry (mm) - shared with the visualisers via arm_params.yaml.
     const double base_radius = declare_parameter<double>("geometry.base_radius", 100.0);
@@ -166,7 +173,14 @@ void DeltaArmControllerNode::setupActionServer() {
         this, "arm/set_pos",
         std::bind(&DeltaArmControllerNode::handleGoal, this, std::placeholders::_1, std::placeholders::_2),
         std::bind(&DeltaArmControllerNode::handleCancel, this, std::placeholders::_1),
-        std::bind(&DeltaArmControllerNode::executeAction, this, std::placeholders::_1));
+        std::bind(&DeltaArmControllerNode::executeAction, this, std::placeholders::_1),
+        rcl_action_server_get_default_options(), action_cb_group_);
+}
+
+void DeltaArmControllerNode::setupMotorFeedback() {
+    motor_fb_sub_ = create_subscription<arm::msg::MotorFeedback>(
+        "arm/MotorFeedback", 10,
+        std::bind(&DeltaArmControllerNode::onMotorFeedback, this, std::placeholders::_1));
 }
 
 void DeltaArmControllerNode::setupPositionFeedback() {
@@ -200,7 +214,10 @@ rclcpp_action::CancelResponse DeltaArmControllerNode::handleCancel(const std::sh
 }
 
 void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goal_handle) {
-    current_goal_handle_ = goal_handle;
+    {
+        std::lock_guard<std::mutex> lock(goal_mutex_);
+        current_goal_handle_ = goal_handle;
+    }
     const auto goal = *goal_handle->get_goal();
 
     const float x = static_cast<float>(goal.target.linear.x);
@@ -211,7 +228,11 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
 
     // Stage the task-space target and run the (two-stage) IK. The result is
     // published to the driver on arm/motor_targets.
-    const DeltaArm::TargetResult reach = arm_.set_tar_pos(x, y, z);
+    DeltaArm::TargetResult reach;
+    {
+        std::lock_guard<std::mutex> lock(arm_mutex_);
+        reach = arm_.set_tar_pos(x, y, z);
+    }
     if (!reach.reached) {
         // Reporting success here used to make an unreachable goal look exactly
         // like a dead motor: the arm simply did not move. Abort instead, and
@@ -221,40 +242,120 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
         result->status = SetPosition::Result::STATUS_UNREACHABLE;
         goal_handle->abort(result);
 
-        if (current_goal_handle_ == goal_handle)
-            current_goal_handle_.reset();
+        clearGoal(goal_handle);
         return;
     }
 
     float angles[3] = {0.0f, 0.0f, 0.0f};
-    arm_.get_motor_targets(angles);
+    {
+        std::lock_guard<std::mutex> lock(arm_mutex_);
+        arm_.get_motor_targets(angles);
+    }
     publishTargets(angles);
 
-    // Sim mode: there is no motor driver to close the loop, so promote the
-    // commanded target to the current pose immediately. The arm/pos stream then
-    // reflects the requested pose and the visualiser can draw the motion.
-    if (simulate_arrival_)
+    // Sim mode: with no motor feedback yet, promote the commanded target to the
+    // current pose immediately so the arm/pos stream and visualiser show the
+    // requested motion. Once real feedback is seen, wait for the measured pose.
+    if (!feedback_seen_.load() && simulate_arrival_) {
+        std::lock_guard<std::mutex> lock(arm_mutex_);
         arm_.apply();
+    }
 
-    // Feedback: current end-effector estimate (skeleton: streamed estimate).
-    auto feedback = std::make_shared<SetPosition::Feedback>();
-    const DeltaArm::Vec3 cur = arm_.get_cur_pos();
-    feedback->current.x = cur.x;
-    feedback->current.y = cur.y;
-    feedback->current.z = cur.z;
-    goal_handle->publish_feedback(feedback);
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::duration<double>(reach_timeout_);
 
-    auto result = std::make_shared<SetPosition::Result>();
-    result->status = SetPosition::Result::STATUS_OK;
-    goal_handle->succeed(result);
+    while (rclcpp::ok()) {
+        if (goal_handle->is_canceling()) {
+            auto result = std::make_shared<SetPosition::Result>();
+            result->status = SetPosition::Result::STATUS_POS_NOT_REACHED;
+            goal_handle->canceled(result);
 
-    if (current_goal_handle_ == goal_handle)
-        current_goal_handle_.reset();
+            clearGoal(goal_handle);
+            return;
+        }
+
+        DeltaArm::Vec3 cur;
+        DeltaArm::Vec3 tar;
+        {
+            std::lock_guard<std::mutex> lock(arm_mutex_);
+            cur = arm_.get_cur_pos();
+            tar = arm_.get_tar_pos();
+        }
+
+        // A newer set_pos goal replaces the commanded target. Abort this one
+        // instead of waiting for a pose the arm is no longer aiming at.
+        if (std::fabs(static_cast<double>(tar.x) - x) > 1e-6 ||
+            std::fabs(static_cast<double>(tar.y) - y) > 1e-6 ||
+            std::fabs(static_cast<double>(tar.z) - z) > 1e-6) {
+            RCLCPP_INFO(get_logger(), "set_pos (%.3f, %.3f, %.3f) superseded by a newer goal", x, y, z);
+            auto result = std::make_shared<SetPosition::Result>();
+            result->status = SetPosition::Result::STATUS_POS_NOT_REACHED;
+            goal_handle->abort(result);
+            clearGoal(goal_handle);
+            return;
+        }
+
+        const double dx = static_cast<double>(cur.x) - x;
+        const double dy = static_cast<double>(cur.y) - y;
+        const double dz = static_cast<double>(cur.z) - z;
+        const double error = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+        auto feedback = std::make_shared<SetPosition::Feedback>();
+        feedback->current.x = cur.x;
+        feedback->current.y = cur.y;
+        feedback->current.z = cur.z;
+        goal_handle->publish_feedback(feedback);
+
+        if (error <= reach_tolerance_) {
+            auto result = std::make_shared<SetPosition::Result>();
+            result->status = SetPosition::Result::STATUS_OK;
+            goal_handle->succeed(result);
+
+            clearGoal(goal_handle);
+            return;
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            RCLCPP_WARN(get_logger(),
+                        "set_pos NOT REACHED (%.3f, %.3f, %.3f) m: %.1f mm from target "
+                        "(tolerance %.1f mm, timeout %.1f s)",
+                        x, y, z, error * 1000.0, reach_tolerance_ * 1000.0, reach_timeout_);
+            auto result = std::make_shared<SetPosition::Result>();
+            result->status = SetPosition::Result::STATUS_POS_NOT_REACHED;
+            goal_handle->abort(result);
+
+            clearGoal(goal_handle);
+            return;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // arm/pos (+ optional arm/joints debug) feedback
 // ---------------------------------------------------------------------------
+void DeltaArmControllerNode::clearGoal(const std::shared_ptr<GoalHandle>& goal_handle) {
+    std::lock_guard<std::mutex> lock(goal_mutex_);
+    if (current_goal_handle_ == goal_handle)
+        current_goal_handle_.reset();
+}
+
+void DeltaArmControllerNode::onMotorFeedback(const arm::msg::MotorFeedback::SharedPtr msg) {
+    feedback_seen_.store(true);
+
+    float angles[3] = {0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 3; ++i) {
+        const float angle = msg->servo_angle_current[i];
+        if (msg->servo_online[i] != 1 || angle < 0.0f || !std::isfinite(angle))
+            return;
+        angles[i] = angle;
+    }
+
+    std::lock_guard<std::mutex> lock(arm_mutex_);
+    arm_.set_motor_feedback(angles);
+}
+
 void DeltaArmControllerNode::publishTargets(const float* angles) {
     auto msg = std::make_shared<arm::msg::MotorTargets>();
     msg->header.stamp = now();
@@ -270,21 +371,27 @@ void DeltaArmControllerNode::publishPosition() {
     msg->header.stamp = now();
     msg->header.frame_id = feedback_frame_;
 
-    const DeltaArm::Vec3 cur = arm_.get_cur_pos();
+    DeltaArm::Vec3 cur;
+    DeltaArm::Vec3 tar;
+    float cur_angles[3] = {0.0f, 0.0f, 0.0f};
+    float tar_angles[3] = {0.0f, 0.0f, 0.0f};
+    {
+        std::lock_guard<std::mutex> lock(arm_mutex_);
+        cur = arm_.get_cur_pos();
+        tar = arm_.get_tar_pos();
+        arm_.get_motor_current(cur_angles);
+        arm_.get_motor_targets(tar_angles);
+    }
+
     msg->position.x = cur.x;
     msg->position.y = cur.y;
     msg->position.z = cur.z;
 
     // Commanded target (control intent) so visualisers can mark it directly.
-    const DeltaArm::Vec3 tar = arm_.get_tar_pos();
     msg->target_position.x = tar.x;
     msg->target_position.y = tar.y;
     msg->target_position.z = tar.z;
 
-    float cur_angles[3] = {0.0f, 0.0f, 0.0f};
-    float tar_angles[3] = {0.0f, 0.0f, 0.0f};
-    arm_.get_motor_current(cur_angles);
-    arm_.get_motor_targets(tar_angles);
     for (int i = 0; i < 3; ++i) {
         msg->motor_angles_current[i] = cur_angles[i];
         msg->motor_angles_target[i] = tar_angles[i];

@@ -35,7 +35,7 @@ find_package(SFML 2.5 COMPONENTS graphics window system QUIET)
 # ---------------------------------------------------------------------------
 set(arm_msg_files
   "msg/ArmPosition.msg"
-  "msg/ArmFeedback.msg"
+  "msg/MotorFeedback.msg"
   "msg/MotorTargets.msg"
 )
 set(arm_action_files

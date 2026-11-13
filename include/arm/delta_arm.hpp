@@ -212,6 +212,11 @@ public:
   ///        currents and refresh the forward position estimate.
   void apply();
 
+  /// @brief Update the current state from measured motor angles (degrees).
+  ///        The forward estimate is refreshed from the measured angles; the
+  ///        commanded target is left unchanged.
+  void set_motor_feedback(const float angles_deg[3]);
+
   /// @brief Whether the forward estimate (cur_pos_) tracks the target.
   static constexpr float kReachableTolerance = 1e-3f;
 

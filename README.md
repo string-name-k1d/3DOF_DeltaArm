@@ -135,8 +135,8 @@ ros2 topic echo arm/MotorFeedback
 
 `config/arm_params.yaml` holds the per-node parameters:
 
-- `arm_controller`: `feedback_rate`, `feedback_frame`, plus the shared
-  `geometry.*` and `sim.*` blocks.
+- `arm_controller`: `feedback_rate`, `feedback_frame`, `reach_tolerance`,
+  `reach_timeout`, plus the shared `geometry.*` and `sim.*` blocks.
 - `arm_motor_driver`: `port_name`, `baudrate`, `servo_ids`, `start_angles`,
   `angle_min`/`angle_max`, `max_speed`, `auto_init`, `targets_topic`,
   `offline_streak`.
@@ -166,11 +166,11 @@ a sibling package (see `AGENT.md`).
 
 | Name                | Type                           | Direction              | Purpose                                                                                                                          |
 | ------------------- | ------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `arm/set_pos`       | action `SetPosition`           | client → controller    | Goal is a `geometry_msgs/Twist`; `linear.x/y/z` is the target in metres. Result `status` is `STATUS_OK` or `STATUS_UNREACHABLE`. |
+| `arm/set_pos`       | action `SetPosition`           | client → controller    | Goal is a `geometry_msgs/Twist`; `linear.x/y/z` is the target in metres. Result `status` is `STATUS_OK`, `STATUS_UNREACHABLE` or `STATUS_POS_NOT_REACHED`. |
 | `arm/pos`           | topic `ArmPosition`            | controller → consumers | Current pose, commanded target, current/target motor angles.                                                                     |
 | `arm/joints`        | topic `sensor_msgs/JointState` | controller → consumers | Optional 2-D debug stream (three motor angles, degrees).                                                                         |
 | `arm/motor_targets` | topic `MotorTargets`           | controller → driver    | Three motor-angle commands (degrees).                                                                                            |
-| `arm/MotorFeedback` | topic `ArmFeedback`            | driver → consumers     | Measured angle, online flag and error code per servo.                                                                            |
+| `arm/MotorFeedback` | topic `MotorFeedback`          | driver → consumers     | Measured angle, online flag and error code per servo.                                                                            |
 
 ## Tests
 

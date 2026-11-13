@@ -139,7 +139,7 @@ class Sweep(Node):
         if gh is None or not gh.accepted:
             return "NO_ADMIT", ""
         rfut = gh.get_result_async()
-        rclpy.spin_until_future_complete(self, rfut, timeout_sec=8.0)
+        rclpy.spin_until_future_complete(self, rfut, timeout_sec=20.0)
         res = rfut.result()
         if res is None:
             return "NO_RESULT", ""
@@ -147,6 +147,8 @@ class Sweep(Node):
             return "OK", ""
         if res.result.status == SetPosition.Result.STATUS_UNREACHABLE:
             return "REFUSED", "target outside reachable envelope"
+        if res.result.status == SetPosition.Result.STATUS_POS_NOT_REACHED:
+            return "NOT_REACHED", "target not reached within tolerance"
         return "REFUSED", f"status {res.result.status}"
 
     def wait_reached(self, want, timeout=None):

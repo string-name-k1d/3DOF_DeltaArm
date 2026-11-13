@@ -5,7 +5,7 @@
   <version>0.1.0</version>
   <description>
     Minimal 3DOF delta arm package. Provides the custom SetPosition action,
-    ArmPosition / MotorTargets / ArmFeedback messages, the two-stage
+    ArmPosition / MotorTargets / MotorFeedback messages, the two-stage
     inverse-kinematics controller node (set_pos action + arm/pos feedback
     topic), the FashionStart UART-servo motor driver (arm/motor_targets ->
     arm/MotorFeedback), and an optional 2-D SFML visualiser.

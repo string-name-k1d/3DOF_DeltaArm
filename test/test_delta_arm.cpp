@@ -109,6 +109,32 @@ TEST(DeltaArm, EmergencyStopZeroesOutputs)
   EXPECT_FLOAT_EQ(cur.z, 0.0f);
 }
 
+TEST(DeltaArm, MotorFeedbackUpdatesCurrentWithoutChangingTarget)
+{
+  DeltaArm::Arm arm(nullptr);
+  arm.init();
+
+  ASSERT_TRUE(arm.set_tar_pos(0.0f, 0.0f, -0.28f).reached);
+  float measured[3] = {0.0f, 0.0f, 0.0f};
+  arm.get_motor_targets(measured);
+
+  ASSERT_TRUE(arm.set_tar_pos(0.03f, 0.0f, -0.26f).reached);
+  float commanded[3] = {0.0f, 0.0f, 0.0f};
+  arm.get_motor_targets(commanded);
+
+  arm.set_motor_feedback(measured);
+
+  const DeltaArm::Vec3 cur = arm.get_cur_pos();
+  EXPECT_NEAR(cur.x, 0.0f, 3.0e-3f);
+  EXPECT_NEAR(cur.y, 0.0f, 3.0e-3f);
+  EXPECT_NEAR(cur.z, -0.28f, 3.0e-3f);
+
+  float after[3] = {0.0f, 0.0f, 0.0f};
+  arm.get_motor_targets(after);
+  for (int i = 0; i < 3; ++i)
+    EXPECT_FLOAT_EQ(after[i], commanded[i]);
+}
+
 // The IK and FK must be mutually consistent (perlimb closed chain, effector
 // triangle apex-down, shoulder pivots on the base-plate corner circle): solving
 // IK for a target and then running FK on those motor angles must recover the

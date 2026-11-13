@@ -114,7 +114,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
     }
 
     // ROS Start up
-    feedback_pub_ = create_publisher<arm::msg::ArmFeedback>("arm/MotorFeedback", 10);
+    feedback_pub_ = create_publisher<arm::msg::MotorFeedback>("arm/MotorFeedback", 10);
 
     const auto period =
         std::chrono::milliseconds(static_cast<int64_t>(1000.0 / (feedback_rate_ > 0.0 ? feedback_rate_ : 1.0)));
@@ -161,6 +161,12 @@ void MotorDriverNode::declareParams() {
 }
 
 void MotorDriverNode::onMotorTargets(const arm::msg::MotorTargets::SharedPtr msg) {
+    if (!driver_) {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                             "ignoring arm/motor_targets - no serial device, servos are offline");
+        return;
+    }
+
     float angles[3] = {msg->angles[0], msg->angles[1], msg->angles[2]};
     std::lock_guard<std::mutex> lock(bus_mutex_);
     driver_->set_target_angles(angles, 3);
@@ -173,7 +179,7 @@ void MotorDriverNode::handleServoFault(int index, int error_code) {
 }
 
 void MotorDriverNode::publishFeedback() {
-    auto msg = std::make_shared<arm::msg::ArmFeedback>();
+    auto msg = std::make_shared<arm::msg::MotorFeedback>();
     msg->header.stamp = now();
     msg->header.frame_id = feedback_frame_;
 

@@ -14,6 +14,12 @@ arm_controller:
     feedback_rate: 20.0
     # feedback_frame: coordinate frame attached to the published messages.
     feedback_frame: "base_link"
+    # reach_tolerance: maximum end-effector distance (m) from the goal that
+    #   counts as reached; smaller returns STATUS_POS_NOT_REACHED.
+    reach_tolerance: 0.005
+    # reach_timeout: seconds to wait for the measured pose to enter the
+    #   tolerance before the action returns STATUS_POS_NOT_REACHED.
+    reach_timeout: 10.0
 
 # ============================================================================
 # Shared delta-arm mechanism geometry (read by BOTH the controller kinematics

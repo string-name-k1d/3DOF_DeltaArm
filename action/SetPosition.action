@@ -13,6 +13,7 @@ geometry_msgs/Twist target
 ## Result: completion status
 uint8 STATUS_OK = 0
 uint8 STATUS_UNREACHABLE = 1
+uint8 STATUS_POS_NOT_REACHED = 2
 uint8 status
 
 ---

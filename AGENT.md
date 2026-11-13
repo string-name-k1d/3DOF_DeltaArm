@@ -8,7 +8,7 @@ the repository root. When integrated as a submodule, it is mounted/copied into
 
 | Concern | Location |
 |---|---|
-| Interfaces | `action/SetPosition.action`, `msg/{ArmPosition,ArmFeedback,MotorTargets}.msg` |
+| Interfaces | `action/SetPosition.action`, `msg/{ArmPosition,MotorFeedback,MotorTargets}.msg` |
 | Kinematics library | `src/controller/delta-arm_dynamics.cpp`, `include/arm/delta_arm.hpp` |
 | Controller node | `src/controller/`, `include/arm/delta_arm_controller.hpp` |
 | Servo driver | `src/driver/`, `include/arm/motor_driver*.hpp` |

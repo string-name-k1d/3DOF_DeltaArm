@@ -6,7 +6,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
-#include "arm/msg/arm_feedback.hpp"
+#include "arm/msg/motor_feedback.hpp"
 #include "arm/msg/motor_targets.hpp"
 #include "arm/motor_driver.hpp"
 
@@ -32,7 +32,7 @@ private:
 
   std::shared_ptr<DeltaArmDriver::MotorDriver> driver_;
   rclcpp::Subscription<arm::msg::MotorTargets>::SharedPtr target_sub_;
-  rclcpp::Publisher<arm::msg::ArmFeedback>::SharedPtr feedback_pub_;
+  rclcpp::Publisher<arm::msg::MotorFeedback>::SharedPtr feedback_pub_;
   rclcpp::TimerBase::SharedPtr feedback_timer_;
 
   double feedback_rate_;

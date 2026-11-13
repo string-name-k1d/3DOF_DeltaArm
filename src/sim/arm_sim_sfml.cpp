@@ -15,9 +15,9 @@ ArmSimSFMLNode::ArmSimSFMLNode(const rclcpp::NodeOptions & options)
     "arm/pos", 10,
     [this](const arm::msg::ArmPosition::SharedPtr msg) { onPosition(msg); });
 
-  fb_sub_ = create_subscription<arm::msg::ArmFeedback>(
+  fb_sub_ = create_subscription<arm::msg::MotorFeedback>(
     "arm/MotorFeedback", 10,
-    [this](const arm::msg::ArmFeedback::SharedPtr msg) { onFeedback(msg); });
+    [this](const arm::msg::MotorFeedback::SharedPtr msg) { onFeedback(msg); });
 
   configureKinematics();
 
@@ -129,6 +129,8 @@ void ArmSimSFMLNode::send_target(double x, double y, double z)
         last_rejection_ = "set_pos goal was not accepted";
       } else if (res->status == SetPosition::Result::STATUS_UNREACHABLE) {
         last_rejection_ = "target outside the reachable envelope";
+      } else if (res->status == SetPosition::Result::STATUS_POS_NOT_REACHED) {
+        last_rejection_ = "target not reached within tolerance";
       } else {
         last_rejection_ = "set_pos rejected (status " + std::to_string(res->status) + ")";
       }
@@ -154,7 +156,7 @@ void ArmSimSFMLNode::onPosition(const arm::msg::ArmPosition::SharedPtr msg)
   got_pos_ = true;
 }
 
-void ArmSimSFMLNode::onFeedback(const arm::msg::ArmFeedback::SharedPtr msg)
+void ArmSimSFMLNode::onFeedback(const arm::msg::MotorFeedback::SharedPtr msg)
 {
   for (int i = 0; i < 3; ++i) {
     fb_ang_[i] = msg->servo_angle_current[i];

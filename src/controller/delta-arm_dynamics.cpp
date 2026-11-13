@@ -823,4 +823,16 @@ void Arm::apply() {
     cur_pos_ = forward_kinematics(cur_angles_);
 }
 
+void Arm::set_motor_feedback(const float angles_deg[3]) {
+    // Measured angles are already in the joint frame (the driver removes the
+    // installation offset). Refresh the forward estimate without touching the
+    // commanded target.
+    for (int i = 0; i < 3; ++i) {
+        cur_angles_[i] = angles_deg[i];
+        motors_[i].cur_pos = angles_deg[i];
+    }
+
+    cur_pos_ = forward_kinematics(cur_angles_);
+}
+
 } // namespace DeltaArm

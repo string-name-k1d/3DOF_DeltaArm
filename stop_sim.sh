@@ -1,16 +1,18 @@
 #!/bin/bash
 # stop_sim.sh — stop any running arm simulation/controller processes (2-D SFML,
-# 3-D Gazebo or real-hardware stack) inside the container.
+# 3-D Gazebo or real-hardware stack). Works in a native ROS 2 install and inside
+# the Docker container.
 #
 # Run this before relaunching so a fresh launch never clashes on ROS node
 # names (e.g. two /arm_controller nodes). Being a script FILE (not an inline
 # `bash -lc` command) keeps the "ros2 launch arm" pkill pattern from matching
 # this script's own command line.
 #
-# Usage (inside the container):
-#   bash /root/ros2_ws/src/arm/stop_sim.sh
-#   bash /root/ros2_ws/src/arm/stop_sim.sh --keep-gz
-#   bash /root/ros2_ws/src/arm/stop_sim.sh --watch arm_sim_sfml
+# Usage (from anywhere; adjust the path to where this package lives):
+#   bash <ws>/src/fyp/arm/stop_sim.sh
+#   bash <ws>/src/fyp/arm/stop_sim.sh --keep-gz
+#   bash <ws>/src/fyp/arm/stop_sim.sh --watch arm_sim_sfml
+#   # Docker: bash /root/ros2_ws/src/arm/stop_sim.sh
 #
 # --keep-gz: kill only the ARM stack, leave Gazebo itself (gzserver/gzclient)
 #   running. Required when attaching the arm to an already-running world (the
@@ -34,10 +36,10 @@ done
 
 # Is a LIVE (non-zombie) process whose comm matches $1 running?
 # Two subtleties, both learned the hard way:
-#  * The stat filter matters: this container's PID 1 is 'tail -f /dev/null',
-#    which never reaps orphans, so every killed process lingers forever as
-#    'Z [name] <defunct>' and a plain pgrep/grep would keep reporting it as
-#    present — the watchdog would then never fire.
+#  * The stat filter matters: in the Docker container PID 1 is
+#    'tail -f /dev/null', which never reaps orphans, so every killed process
+#    lingers forever as 'Z [name] <defunct>' and a plain pgrep/grep would keep
+#    reporting it as present — the watchdog would then never fire.
 #  * Match comm=, NOT args=. This script's own command line is
 #    "stop_sim.sh --watch arm_sim_sfml", so an args= match finds ITSELF and
 #    waits forever. comm= is the bare executable name (bash / stop_sim.sh here),

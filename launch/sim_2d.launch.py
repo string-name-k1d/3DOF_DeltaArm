@@ -12,7 +12,10 @@ to true; pass control:=false to observe the real arm without commanding it.
 
 import os
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import (
+    get_package_prefix,
+    get_package_share_directory,
+)
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.actions import IncludeLaunchDescription, Shutdown
@@ -21,7 +24,35 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _require_sfml_simulator():
+    """Fail with an actionable message when SFML was not available at build time.
+
+    arm_sim_sfml is optional (SFML is not a rosdep dependency), so a build on a
+    machine without libsfml-dev succeeds but silently omits this executable.
+    Without this check `ros2 launch` would only report "executable not found".
+    """
+    sim_binary = os.path.join(
+        get_package_prefix('arm'), 'lib', 'arm', 'arm_sim_sfml')
+    if os.path.isfile(sim_binary):
+        return
+
+    raise RuntimeError(
+        'arm_sim_sfml was not built because SFML is not installed.\n'
+        'The rest of the package builds and runs without it.\n'
+        '\n'
+        'Install SFML and rebuild to get the 2-D view:\n'
+        '  sudo apt install libsfml-dev\n'
+        '  colcon build --symlink-install --packages-select arm\n'
+        '\n'
+        'Or use a launch that needs no 2-D window:\n'
+        '  ros2 launch arm hardware.launch.py driver:=false  # fake hardware\n'
+        '  ros2 launch arm hardware.launch.py                # real hardware\n'
+        '  ros2 launch arm_gazebo sim_3d.launch.py           # 3-D Gazebo')
+
+
 def generate_launch_description():
+    _require_sfml_simulator()
+
     pkg_share = get_package_share_directory('arm')
     default_params_file = os.path.join(pkg_share, 'config', 'arm_params.yaml')
     bringup_file = os.path.join(

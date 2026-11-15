@@ -5,6 +5,9 @@
 # Optional add-on: installs the Gazebo Harmonic (gz-sim 8) closed-loop 3-D
 # simulation stack for the delta arm (the `3d` path of run_arm.sh).
 #
+#     # native (Ubuntu 22.04 + ROS 2 Humble), from the package directory:
+#     sudo bash scripts/install_gazebo_harmonic.sh
+#     # Docker:
 #     bash /root/ros2_ws/src/arm/scripts/install_gazebo_harmonic.sh
 #
 # Installs (in order):

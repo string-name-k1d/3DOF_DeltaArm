@@ -27,6 +27,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Per-machine defaults (DISPLAY, SERIAL_DEVICE, XAUTHORITY, ...). Shell
+# environment variables take precedence; Docker Compose reads the same .env.
+# shellcheck source=scripts/dotenv.sh
+source "$REPO_ROOT/scripts/dotenv.sh"
+DOTENV_FILE=""
+load_dotenv_first "$REPO_ROOT/.env" || true
+
 SERVICE=arm-hardware
 FOREGROUND=0
 ARGS_GIVEN=0

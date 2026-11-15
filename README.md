@@ -9,24 +9,122 @@ See [`docs/KINEMATICS.md`](docs/KINEMATICS.md). The implementation lives in
 
 ## TOC
 
-1. [Build](#build)
-2. [Run](#run)
-3. [Configs](#configuration)
-4. [ROS Archi](#ros-interfaces)
+1. [Build (local ROS 2)](#build-local-ros-2)
+2. [Docker (optional)](#docker-optional)
+3. [Run](#run)
+4. [Configs](#configuration)
+5. [ROS Archi](#ros-interfaces)
 
-## Build
+## Build (local ROS 2)
+
+Target environment: Ubuntu 22.04 + ROS 2 Humble installed **natively** (no
+Docker). This repository is the `arm` package; in an integrated workspace it is
+usually vendored under a parent package, for example:
+
+```text
+arm_ws/
+└── src/
+    └── fyp/
+        └── arm/          <-- this repository
+```
+
+Run `colcon` from the workspace root (`arm_ws/`), not from this directory.
+
+### Prerequisites
 
 ```bash
-# for FashionStart SDK git submodule:
-git submodule update --init --recursive
+source /opt/ros/humble/setup.bash
 
-# From the repository root, in a ROS 2 Humble environment:
-colcon build --symlink-install
+sudo apt install -y \
+    python3-colcon-common-extensions python3-rosdep \
+    ros-humble-rclcpp-action ros-humble-ament-cmake-gtest
+
+# once per machine
+sudo rosdep init 2>/dev/null || true
+rosdep update
+```
+
+```bash
+# FashionStar UART Servo Driver (run inside this package; if the parent repo
+# owns the submodule, use: git -C src/fyp/arm submodule update --init --recursive)
+git submodule update --init --recursive
+```
+
+### Optional: 2-D SFML visualiser
+
+`arm_sim_sfml` (the `sim_2d.launch.py` window) is optional and is **not** a
+rosdep dependency.
+
+```bash
+sudo apt install libsfml-dev        # enables arm_sim_sfml
+```
+
+Without SFML the configure step prints
+`arm: SFML not found - skipping the 2-D visualiser (arm_sim_sfml)` and the build
+continues. To skip it explicitly even when SFML is present, set
+`ARM_BUILD_SFML_SIM=OFF` in `.env` (see below), or pass the CMake flag directly:
+
+```bash
+colcon build --symlink-install --cmake-args -DARM_BUILD_SFML_SIM=OFF
+```
+
+### Environment overrides (`.env`)
+
+Machine-specific defaults live in a gitignored `.env` at the package root.
+Start from the tracked example, then edit it:
+
+```bash
+cp .env.example .env
+```
+
+Precedence is **shell environment > `.env` > script defaults**. The file is
+read by `scripts/build.sh`, `run_arm.sh`, and Docker Compose (which loads
+`.env` from this directory automatically).
+
+| Key | Default | Used by |
+| --- | --- | --- |
+| `ROS_DISTRO` | `humble` | `run_arm.sh`, `scripts/build.sh` |
+| `ARM_WS` | auto-detected | `scripts/build.sh` |
+| `ARM_BUILD_SFML_SIM` | `ON` | `scripts/build.sh` only |
+| `ARM_BUILD_PACKAGES` | `arm` | `scripts/build.sh` only |
+| `ARM_PARAMS_FILE` | `config/arm_params.yaml` | `run_arm.sh` |
+| `SERIAL_DEVICE` | `/dev/ttyUSB0` | Docker Compose / `launch_container.sh` |
+| `DISPLAY`, `XAUTHORITY` | live session | override only |
+
+Keep `DISPLAY` out of `.env` normally: Compose and native runs inherit the
+live session value.
+
+### Build the workspace
+
+```bash
+cp .env.example .env            # once; edit per machine
+./scripts/build.sh              # .env + ROS setup + colcon
+source ~/arm_ws/install/setup.bash
+```
+
+`scripts/build.sh` can be run from anywhere, auto-detects the workspace root,
+honours `ARM_BUILD_SFML_SIM`/`ARM_BUILD_PACKAGES`, and forwards extra arguments
+to `colcon`. Equivalent manual build:
+
+```bash
+colcon build --symlink-install --packages-select arm
 source install/setup.bash
 ```
 
-The bundled `compose.yaml` keeps the USB-serial adapter out of the default
-`arm` service, so simulation and development work without hardware:
+Add the optional 3-D Gazebo package when it is staged as a sibling of `arm`
+(see [`AGENT.md`](AGENT.md)), either with
+`ARM_BUILD_PACKAGES="arm arm_gazebo"` in `.env` or explicitly:
+
+```bash
+colcon build --symlink-install --packages-select arm arm_gazebo
+```
+
+After sourcing, `ros2 pkg prefix arm` should print `<arm_ws>/install/arm`.
+
+## Docker (optional)
+
+The bundled `compose.yaml` keeps the USB-serial adapter out of the
+default `arm` service, so simulation and development work without hardware:
 
 ```bash
 docker compose run --rm arm              # fake 2-D reference, control on
@@ -37,6 +135,10 @@ docker compose run --rm arm bash         # dev shell / build
 docker compose run --rm arm-hardware     # real hardware + 2-D reference,
                                          # control on; binds /dev/ttyUSB0
 ```
+
+Docker Compose reads `.env` from this directory automatically for variable
+substitution (shell variables still win), so `DISPLAY`, `SERIAL_DEVICE` and
+`XAUTHORITY` can be overridden there.
 
 For a one-step launch that starts the stack and leaves you in a shell inside
 the container:
@@ -68,7 +170,11 @@ when the `XAUTHORITY`/`~/.Xauthority` file does not exist).
 
 ## Run
 
-Use [run_arm.sh](run_arm.sh) for unified launch commands. Refer to comments there.
+[run_arm.sh](run_arm.sh) provides unified launch commands for a native install
+and for the Docker container. It reads `.env` when present (package root, or
+the mounted repo in Docker), can be run from the workspace root or this package
+directory, and sets up ROS/overlay sourcing itself. Refer to its comments for
+all modes.
 
 | Launch                        | Purpose                                                   |
 | ----------------------------- | --------------------------------------------------------- |
@@ -81,8 +187,8 @@ Every bringup accepts `control:=true|false` to enable or disable motor motion,
 and `manual:=true` to add keyboard (WASD + Z/X) target control. Control defaults
 to **true**; manual defaults to **false**.
 
-`./run_arm.sh` with no arguments starts real hardware plus the 2-D
-model reference, with control on.
+`./run_arm.sh` with no arguments starts real hardware plus the 2-D model
+reference, with control on.
 
 ```bash
 # 2-D simulation (motion on by default)

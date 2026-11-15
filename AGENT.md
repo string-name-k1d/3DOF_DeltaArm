@@ -1,8 +1,11 @@
 # AGENT.md — Guide for AI Coding Agents
 
 This repository is a single ROS 2 package named `arm`. The package root **is**
-the repository root. When integrated as a submodule, it is mounted/copied into
-`ros2_ws/src/arm`.
+the repository root. When integrated as a submodule it is vendored into a
+workspace, for example:
+
+- native install: `arm_ws/src/fyp/arm` (Ubuntu 22.04 + ROS 2 Humble, no Docker)
+- Docker: `/root/ros2_ws/src/arm`, or `/root/ws` when built standalone
 
 ## Layout
 
@@ -21,14 +24,32 @@ the repository root. When integrated as a submodule, it is mounted/copied into
 
 ## Build & test
 
+Native (preferred on the target device: Ubuntu 22.04 + ROS 2 Humble, no
+Docker). Run colcon from the workspace root, e.g. `~/arm_ws`:
+
 ```bash
-git submodule update --init --recursive
-colcon build --symlink-install
+source /opt/ros/humble/setup.bash
+cd ~/arm_ws
+git -C src/fyp/arm submodule update --init --recursive   # FashionStar SDK
+rosdep install --from-paths src --ignore-src -r -y
+cp src/fyp/arm/.env.example src/fyp/arm/.env             # per-machine; gitignored
+./src/fyp/arm/scripts/build.sh                           # .env + ROS + colcon
+source install/setup.bash
 colcon test --packages-select arm
 ```
 
-A Docker image with ROS 2 Humble is provided (`Dockerfile`, `compose.yaml`).
-On a host without a local ROS installation, build with:
+`scripts/build.sh` reads `.env` (shell env wins), auto-detects the workspace
+root, and passes `-DARM_BUILD_SFML_SIM=...` from it. Plain `colcon build`
+ignores `.env`; pass `--cmake-args -DARM_BUILD_SFML_SIM=OFF` manually instead.
+
+SFML is optional and is **not** declared in `package.xml`, so `rosdep` and the
+build work without it. `arm_sim_sfml` (2-D view) is built only when
+`libsfml-dev` is installed. Never make SFML a hard build dependency: the
+hardware/controller/driver/test targets must configure and build on a headless
+machine without it.
+
+A Docker image with ROS 2 Humble is also provided (`Dockerfile`,
+`compose.yaml`). On a host without a local ROS installation, build with:
 
 ```bash
 docker run --rm --userns=keep-id -e HOME=/tmp \

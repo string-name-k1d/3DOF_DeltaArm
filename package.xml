@@ -24,8 +24,11 @@
   <depend>sensor_msgs</depend>
 
   <exec_depend>rosidl_default_runtime</exec_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
 
-  <exec_depend>sfml</exec_depend>
+  <!-- The 2-D SFML visualiser (arm_sim_sfml) is optional. SFML is deliberately
+       not declared here so `rosdep install` and a plain `colcon build` work on
+       machines without it. Install libsfml-dev manually to build the 2-D view. -->
   <exec_depend>ros2launch</exec_depend>
 
   <member_of_group>rosidl_interface_packages</member_of_group>

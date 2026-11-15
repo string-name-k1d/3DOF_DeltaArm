@@ -28,7 +28,24 @@ find_package(rosidl_default_generators REQUIRED)
 # Optional: SFML (2D visual simulator). Optional so the hardware/controller/
 # driver build succeeds headless even when the simulator is not installed.
 # (The Gazebo 3D simulator lives in the separate arm_gazebo package.)
-find_package(SFML 2.5 COMPONENTS graphics window system QUIET)
+#
+# SFML is NOT a rosdep dependency: it only enables the optional arm_sim_sfml
+# executable. Install it manually (Ubuntu: sudo apt install libsfml-dev) to
+# get the 2-D view, or configure with -DARM_BUILD_SFML_SIM=OFF to skip it.
+option(ARM_BUILD_SFML_SIM
+  "Build arm_sim_sfml, the optional 2-D SFML visualiser" ON)
+
+if(ARM_BUILD_SFML_SIM)
+  find_package(SFML 2.5 COMPONENTS graphics window system QUIET)
+  if(SFML_FOUND)
+    message(STATUS "arm: SFML found - building the 2-D visualiser (arm_sim_sfml)")
+  else()
+    message(STATUS "arm: SFML not found - skipping the 2-D visualiser "
+      "(arm_sim_sfml); install libsfml-dev to enable it")
+  endif()
+else()
+  message(STATUS "arm: ARM_BUILD_SFML_SIM=OFF - skipping the 2-D visualiser")
+endif()
 
 # ---------------------------------------------------------------------------
 # Custom ROS interfaces defined and used inside this same package.
@@ -53,6 +70,16 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # "fsuartservo" and "cserialport" shared libraries from the checked-out
 # submodule sources (self-contained; see motor_driver/CMakeLists.txt).
 # ---------------------------------------------------------------------------
+if(NOT EXISTS
+   "${CMAKE_CURRENT_SOURCE_DIR}/motor_driver/fashionstart-uart-servo/CMakeLists.txt")
+  message(FATAL_ERROR
+    "The FashionStar SDK submodule is missing:\n"
+    "  motor_driver/fashionstart-uart-servo\n"
+    "Initialise it before building:\n"
+    "  git submodule update --init --recursive\n"
+    "(or, from a parent workspace: "
+    "git -C <path-to-arm> submodule update --init --recursive)")
+endif()
 add_subdirectory(motor_driver)
 
 # Local FSUS + CSerialPort include dirs used by the motor-driver code.
@@ -141,7 +168,8 @@ arm_link_ros(arm_manual)
 # Simulator (OPTIONAL - never blocks the hardware/controller/driver build)
 # ---------------------------------------------------------------------------
 # SFML 2D visual simulator - built only when SFML is available.
-if(SFML_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.cpp")
+if(ARM_BUILD_SFML_SIM AND SFML_FOUND
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.cpp")
   add_executable(arm_sim_sfml
     src/sim/arm_sim_sfml.cpp
     src/sim/arm_sim_sfml_main.cpp

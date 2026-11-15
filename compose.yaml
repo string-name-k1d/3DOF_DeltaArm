@@ -14,8 +14,10 @@
 #
 # The USB serial adapter is bound only by the `arm-hardware` service, so the
 # default `arm` service starts without hardware and defaults to the fake 2-D
-# view. Override the host path for hardware with
-# SERIAL_DEVICE=/dev/ttyUSB2 docker compose run --rm arm-hardware ...
+# view. Per-machine values can live in .env next to this file (see
+# .env.example); the shell environment takes precedence. Override the host
+# path for one run with:
+#   SERIAL_DEVICE=/dev/ttyUSB2 docker compose run --rm arm-hardware ...
 
 x-arm-common: &arm-common
   image: arm:latest

@@ -65,6 +65,9 @@ WORKDIR /root
 #   * "hardware", "simulation"/"fake", "sim2d", "sim3d", "manual" select bringups
 #   * any other argument(s) are executed as a shell command (dev shell/build)
 COPY run_arm.sh /root/run_arm.sh
+# Shared .env loader used by run_arm.sh (the mounted repo's .env is read from
+# the working directory at runtime).
+COPY scripts/dotenv.sh /root/scripts/dotenv.sh
 RUN chmod +x /root/run_arm.sh
 
 ENTRYPOINT ["/root/run_arm.sh"]

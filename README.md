@@ -71,12 +71,14 @@ colcon build --symlink-install --cmake-args -DARM_BUILD_SFML_SIM=OFF
 ### Environment overrides (`.env`)
 
 Machine-specific defaults live in a gitignored `.env` at the package root.
-`./scripts/setup.sh` creates it from `.env.example`; load it in every shell
-that runs the scripts:
+Copy the template and edit it; load it in every shell that runs the scripts:
 
 ```bash
+cp .env.example .env
 source .env
 ```
+
+`./scripts/setup.sh` refuses to run until `.env` exists.
 
 Docker Compose also reads `.env` automatically for variable substitution.
 
@@ -98,7 +100,8 @@ live session value.
 ### Build the workspace
 
 ```bash
-./scripts/setup.sh              # creates .env, builds
+cp .env.example .env            # once, then edit
+./scripts/setup.sh              # builds with .env
 source .env
 source ~/arm_ws/install/setup.bash
 ```

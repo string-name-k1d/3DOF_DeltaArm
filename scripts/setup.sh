@@ -4,16 +4,21 @@
 #   ./scripts/setup.sh                                    # build with .env
 #   ./scripts/setup.sh --event-handlers console_direct+   # extra colcon args
 #
-# Creates .env from .env.example, installs the optional add-ons selected in
-# .env (ARM_INSTALL_GAZEBO / ARM_INSTALL_ROSBRIDGE), and builds the workspace.
-# Re-running is safe: existing files are reused.
+# Requires .env (copy and edit .env.example first), installs the optional
+# add-ons selected in .env (ARM_INSTALL_GAZEBO / ARM_INSTALL_ROSBRIDGE), and
+# builds the workspace. Re-running is safe.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 REPO="$PWD"
 
-# Per-machine configuration.
-[ -f .env ] || cp .env.example .env
+# Per-machine configuration. Create it explicitly so the example paths are
+# never applied by accident.
+if [ ! -f .env ]; then
+  echo "setup.sh: .env not found." >&2
+  echo "  cp .env.example .env    # then edit ARM_WS for this machine" >&2
+  exit 1
+fi
 # shellcheck disable=SC1091
 . ./.env
 

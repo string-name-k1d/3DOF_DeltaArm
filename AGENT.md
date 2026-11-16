@@ -32,7 +32,8 @@ source /opt/ros/humble/setup.bash
 cd ~/arm_ws
 git -C src/fyp/arm submodule update --init --recursive   # FashionStar SDK
 rosdep install --from-paths src --ignore-src -r -y
-./src/fyp/arm/scripts/setup.sh                           # creates .env, builds
+cp src/fyp/arm/.env.example src/fyp/arm/.env             # once, then edit
+./src/fyp/arm/scripts/setup.sh
 . ./.env
 source install/setup.bash
 colcon test --packages-select arm

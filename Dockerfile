@@ -40,8 +40,8 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o 
 # ROS 2 Humble Base + build tooling. rclcpp-action is used by the arm
 # controller/manual nodes (SetPosition action); ament-cmake-gtest builds the
 # test suite in arm/test. Gazebo/rosbridge are NOT baked in anymore: they are
-# optional and installed on demand (see arm/scripts/install_gazebo_harmonic.sh
-# and arm/scripts/install_rosbridge.sh), keeping the image small.
+# optional and installed on demand by arm/scripts/setup.sh
+# (ARM_INSTALL_GAZEBO / ARM_INSTALL_ROSBRIDGE), keeping the image small.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-ros-base \
     ros-humble-rclcpp-action \
@@ -65,9 +65,6 @@ WORKDIR /root
 #   * "hardware", "simulation"/"fake", "sim2d", "sim3d", "manual" select bringups
 #   * any other argument(s) are executed as a shell command (dev shell/build)
 COPY run_arm.sh /root/run_arm.sh
-# Shared .env loader used by run_arm.sh (the mounted repo's .env is read from
-# the working directory at runtime).
-COPY scripts/dotenv.sh /root/scripts/dotenv.sh
 RUN chmod +x /root/run_arm.sh
 
 ENTRYPOINT ["/root/run_arm.sh"]

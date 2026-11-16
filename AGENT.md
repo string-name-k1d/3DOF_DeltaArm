@@ -32,15 +32,15 @@ source /opt/ros/humble/setup.bash
 cd ~/arm_ws
 git -C src/fyp/arm submodule update --init --recursive   # FashionStar SDK
 rosdep install --from-paths src --ignore-src -r -y
-cp src/fyp/arm/.env.example src/fyp/arm/.env             # per-machine; gitignored
-./src/fyp/arm/scripts/build.sh                           # .env + ROS + colcon
+./src/fyp/arm/scripts/setup.sh                           # creates .env, builds
+. ./.env
 source install/setup.bash
 colcon test --packages-select arm
 ```
 
-`scripts/build.sh` reads `.env` (shell env wins), auto-detects the workspace
-root, and passes `-DARM_BUILD_SFML_SIM=...` from it. Plain `colcon build`
-ignores `.env`; pass `--cmake-args -DARM_BUILD_SFML_SIM=OFF` manually instead.
+`scripts/setup.sh` creates/sources `.env`, auto-detects the workspace root,
+and passes `-DARM_BUILD_SFML_SIM=...` from it. Plain `colcon build` ignores
+`.env`; pass `--cmake-args -DARM_BUILD_SFML_SIM=OFF` manually instead.
 
 SFML is optional and is **not** declared in `package.xml`, so `rosdep` and the
 build work without it. `arm_sim_sfml` (2-D view) is built only when

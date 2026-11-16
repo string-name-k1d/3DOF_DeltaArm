@@ -27,23 +27,13 @@
 # Extra launch arguments passed after the mode are forwarded unchanged, e.g.:
 #   ./run_arm.sh 2d driver:=true control:=false
 #   ./run_arm.sh hardware control:=false
+#
+# Per-machine overrides come from the sourced environment:
+#   source .env && ./run_arm.sh 2d
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Optional per-machine overrides (see .env.example). Shell environment variables
-# take precedence. Native runs use the package-root .env; in Docker the repo is
-# mounted at the working directory while this script is copied to /root, so the
-# cwd fallback finds the mounted .env.
-ENV_FILE=""
-if [ -f "$SCRIPT_DIR/scripts/dotenv.sh" ]; then
-  # shellcheck source=scripts/dotenv.sh
-  source "$SCRIPT_DIR/scripts/dotenv.sh"
-  DOTENV_FILE=""
-  load_dotenv_first "$SCRIPT_DIR/.env" "$PWD/.env" || true
-  ENV_FILE="$DOTENV_FILE"
-fi
 
 # ROS 2 environment. Prefer an already-active ROS_DISTRO; otherwise default to
 # Humble, which is what the provided Docker image uses.

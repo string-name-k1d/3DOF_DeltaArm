@@ -71,22 +71,23 @@ colcon build --symlink-install --cmake-args -DARM_BUILD_SFML_SIM=OFF
 ### Environment overrides (`.env`)
 
 Machine-specific defaults live in a gitignored `.env` at the package root.
-Start from the tracked example, then edit it:
+`./scripts/setup.sh` creates it from `.env.example`; load it in every shell
+that runs the scripts:
 
 ```bash
-cp .env.example .env
+source .env
 ```
 
-Precedence is **shell environment > `.env` > script defaults**. The file is
-read by `scripts/build.sh`, `run_arm.sh`, and Docker Compose (which loads
-`.env` from this directory automatically).
+Docker Compose also reads `.env` automatically for variable substitution.
 
 | Key | Default | Used by |
 | --- | --- | --- |
-| `ROS_DISTRO` | `humble` | `run_arm.sh`, `scripts/build.sh` |
-| `ARM_WS` | auto-detected | `scripts/build.sh` |
-| `ARM_BUILD_SFML_SIM` | `ON` | `scripts/build.sh` only |
-| `ARM_BUILD_PACKAGES` | `arm` | `scripts/build.sh` only |
+| `ROS_DISTRO` | `humble` | `setup.sh`, `run_arm.sh` |
+| `ARM_WS` | auto-detected | `setup.sh` |
+| `ARM_BUILD_SFML_SIM` | `ON` | `setup.sh` |
+| `ARM_BUILD_PACKAGES` | `arm` | `setup.sh` |
+| `ARM_INSTALL_GAZEBO` | `0` | `setup.sh` |
+| `ARM_INSTALL_ROSBRIDGE` | `0` | `setup.sh` |
 | `ARM_PARAMS_FILE` | `config/arm_params.yaml` | `run_arm.sh` |
 | `SERIAL_DEVICE` | `/dev/ttyUSB0` | Docker Compose / `launch_container.sh` |
 | `DISPLAY`, `XAUTHORITY` | live session | override only |
@@ -97,14 +98,15 @@ live session value.
 ### Build the workspace
 
 ```bash
-cp .env.example .env            # once; edit per machine
-./scripts/build.sh              # .env + ROS setup + colcon
+./scripts/setup.sh              # creates .env, builds
+source .env
 source ~/arm_ws/install/setup.bash
 ```
 
-`scripts/build.sh` can be run from anywhere, auto-detects the workspace root,
-honours `ARM_BUILD_SFML_SIM`/`ARM_BUILD_PACKAGES`, and forwards extra arguments
-to `colcon`. Equivalent manual build:
+`scripts/setup.sh` can be run from anywhere, auto-detects the workspace root,
+honours `ARM_BUILD_SFML_SIM`/`ARM_BUILD_PACKAGES`, installs the optional
+add-ons selected with `ARM_INSTALL_*`, and forwards extra arguments to
+`colcon`. Equivalent manual build:
 
 ```bash
 colcon build --symlink-install --packages-select arm
@@ -171,10 +173,9 @@ when the `XAUTHORITY`/`~/.Xauthority` file does not exist).
 ## Run
 
 [run_arm.sh](run_arm.sh) provides unified launch commands for a native install
-and for the Docker container. It reads `.env` when present (package root, or
-the mounted repo in Docker), can be run from the workspace root or this package
-directory, and sets up ROS/overlay sourcing itself. Refer to its comments for
-all modes.
+and for the Docker container. After `source .env`, it can be run from the
+workspace root or this package directory, and sets up ROS/overlay sourcing
+itself. Refer to its comments for all modes.
 
 | Launch                        | Purpose                                                   |
 | ----------------------------- | --------------------------------------------------------- |

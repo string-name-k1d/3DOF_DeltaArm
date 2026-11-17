@@ -91,6 +91,7 @@ Docker Compose also reads `.env` automatically for variable substitution.
 | `ARM_INSTALL_GAZEBO` | `0` | `setup.sh` |
 | `ARM_INSTALL_ROSBRIDGE` | `0` | `setup.sh` |
 | `ARM_PARAMS_FILE` | `config/arm_params.yaml` | `run_arm.sh` |
+| `ARM_TMUX_SESSION` | `arm` | `start_arm_tmux.sh` |
 | `SERIAL_DEVICE` | `/dev/ttyUSB0` | Docker Compose / `launch_container.sh` |
 | `DISPLAY`, `XAUTHORITY` | live session | override only |
 
@@ -227,6 +228,21 @@ ros2 launch arm manual.launch.py
 
 Manual keys: W/S move y, A/D move x, Z/X move z, Q quits. The `step` parameter
 sets metres per keypress.
+
+For real hardware, `scripts/start_arm_tmux.sh` starts everything in tmux: the
+hardware launch, the manual node, and a `feedback` window echoing `/arm/pos`
+and `/arm/MotorFeedback`. It uses the local `.env` and `config/arm_params.yaml`
+(or `ARM_PARAMS_FILE`):
+
+```bash
+./scripts/start_arm_tmux.sh
+./scripts/start_arm_tmux.sh control:=false   # observe only, no motion
+tmux kill-session -t arm                     # stop; then ./stop_sim.sh
+```
+
+The fyp workspace mirrors this helper into `scripts/`, plus
+`scripts/start_arm_remote.sh`, which SSHes to another PC and starts/attaches
+the same session there.
 
 In `sim_2d.launch.py` every required process is fatal: closing the window or
 losing the controller/driver shuts the whole launch down, so a failed node

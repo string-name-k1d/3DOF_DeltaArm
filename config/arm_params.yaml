@@ -128,9 +128,8 @@ arm_controller:
 
 arm_motor_driver:
   ros__parameters:
-    # port_name: UART/serial port of the FashionStar bus-servo adapter.
-    #   Linux: "/dev/ttyUSB0"   Windows: "COM8"   (only one of them active).
-    port_name: "/dev/ttyUSB0"
+    # port_name: NOT set here. The FashionStar bus-servo adapter port comes
+    #   from SERIAL_DEVICE in .env (default /dev/ttyUSB0); edit it there.
     # baudrate: UART baud rate of the bus-servo adapter.
     baudrate: 115200
     # servo_ids: binary ids of the three delta-arm actuators, one per limb.

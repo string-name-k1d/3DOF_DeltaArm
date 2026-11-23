@@ -92,7 +92,7 @@ Docker Compose also reads `.env` automatically for variable substitution.
 | `ARM_INSTALL_ROSBRIDGE` | `0` | `setup.sh` |
 | `ARM_PARAMS_FILE` | `config/arm_params.yaml` | `run_arm.sh` |
 | `ARM_TMUX_SESSION` | `arm` | `start_arm_tmux.sh` |
-| `SERIAL_DEVICE` | `/dev/ttyUSB0` | Docker Compose / `launch_container.sh` |
+| `SERIAL_DEVICE` | `/dev/ttyUSB0` | `arm_motor_driver`, Docker Compose |
 | `DISPLAY`, `XAUTHORITY` | live session | override only |
 
 Keep `DISPLAY` out of `.env` normally: Compose and native runs inherit the
@@ -227,22 +227,34 @@ ros2 launch arm manual.launch.py
 ```
 
 Manual keys: W/S move y, A/D move x, Z/X move z, Q quits. The `step` parameter
-sets metres per keypress.
+sets metres per keypress. The node puts the terminal into single-keypress mode
+itself, so it works from a local TTY or an `ssh -t` session; `ros2 launch` does
+not forward stdin to child nodes, so start it with `ros2 run arm arm_manual`
+against an already running stack.
 
-For real hardware, `scripts/start_arm_tmux.sh` starts everything in tmux: the
-hardware launch, the manual node, and a `feedback` window echoing `/arm/pos`
-and `/arm/MotorFeedback`. It uses the local `.env` and `config/arm_params.yaml`
-(or `ARM_PARAMS_FILE`):
+For real hardware, `scripts/start_arm_tmux.sh` creates the tmux windows on
+**this** machine (the Ground Station) while every arm process runs on the
+Jetson over SSH:
+
+- `arm` window: hardware launch + `arm_manual` (pane 1 uses `ssh -t`)
+- `feedback` window: `/arm/pos` + `/arm/MotorFeedback` echoes
+
+Each pane runs `cd <remote dir> && . ./.env && <command>` on the Jetson, so
+`ROS_DISTRO`, `SERIAL_DEVICE`, `ARM_PARAMS_FILE`, X11 settings, etc. all come
+from the **Jetson's** `.env`; nothing is sourced from this laptop's `.env`.
+Only the SSH target is local (`ARM_REMOTE`, `ARM_REMOTE_DIR`):
 
 ```bash
-./scripts/start_arm_tmux.sh
-./scripts/start_arm_tmux.sh control:=false   # observe only, no motion
-tmux kill-session -t arm                     # stop; then ./stop_sim.sh
+./scripts/start_arm_tmux.sh                          # host tegra-ubuntu
+./scripts/start_arm_tmux.sh --host nvidia@tegra-ubuntu --dir ~/arm_ws/src/fyp
+./scripts/start_arm_tmux.sh control:=false           # observe only, no motion
+tmux kill-session -t arm                             # stop tmux on this PC
+ssh tegra-ubuntu 'cd ~/arm_ws/src/fyp && . ./.env && ./scripts/stop_sim.sh'
 ```
 
-The fyp workspace mirrors this helper into `scripts/`, plus
-`scripts/start_arm_remote.sh`, which SSHes to another PC and starts/attaches
-the same session there.
+`start_tmux.sh` in the fyp workspace calls the same helper with
+`--session fyp --no-attach`, so the arm windows join the main session. The
+fyp workspace mirrors this helper into `scripts/`.
 
 In `sim_2d.launch.py` every required process is fatal: closing the window or
 losing the controller/driver shuts the whole launch down, so a failed node
@@ -263,9 +275,11 @@ ros2 topic echo arm/MotorFeedback
 
 - `arm_controller`: `feedback_rate`, `feedback_frame`, `reach_tolerance`,
   `reach_timeout`, plus the shared `geometry.*` and `sim.*` blocks.
-- `arm_motor_driver`: `port_name`, `baudrate`, `servo_ids`, `start_angles`,
+- `arm_motor_driver`: `baudrate`, `servo_ids`, `start_angles`,
   `angle_min`/`angle_max`, `max_speed`, `auto_init`, `targets_topic`,
-  `offline_streak`.
+  `offline_streak`. Its `port_name` is not in the YAML: it defaults to
+  `SERIAL_DEVICE` from `.env` (fallback `/dev/ttyUSB0`). An explicit
+  `port_name` parameter still overrides it.
 - `arm_manual_control`: `step`.
 
 `enable_motion` is deliberately **not** a config-file parameter. The launch

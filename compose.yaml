@@ -40,6 +40,10 @@ x-arm-common: &arm-common
     - QT_X11_NO_MITSHM=1
     - XAUTHORITY=/tmp/.Xauthority
     - ARM_PARAMS_FILE=${ARM_PARAMS_FILE:-}
+    # The motor driver reads SERIAL_DEVICE. The adapter is mapped to this fixed
+    # container path by the arm-hardware service below, so it must stay
+    # /dev/ttyUSB0 here even when the host device is something else.
+    - SERIAL_DEVICE=/dev/ttyUSB0
 
   volumes:
     - .:/root/ws

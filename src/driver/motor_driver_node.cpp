@@ -3,6 +3,8 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace DeltaArmDriverNode {
@@ -127,7 +129,13 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
 }
 
 void MotorDriverNode::declareParams() {
-    declare_parameter<std::string>("port_name", "/dev/ttyUSB0");
+    // Serial port of the FashionStar bus-servo adapter. The per-machine value
+    // comes from SERIAL_DEVICE in .env; the parameter/argument still wins when
+    // explicitly set, and the value falls back to /dev/ttyUSB0 when unset.
+    const char* env_port = std::getenv("SERIAL_DEVICE");
+    const std::string default_port =
+        (env_port != nullptr && env_port[0] != '\0') ? env_port : "/dev/ttyUSB0";
+    declare_parameter<std::string>("port_name", default_port);
     declare_parameter<int>("baudrate", 115200);
     declare_parameter<std::vector<int64_t>>("servo_ids", {0, 1, 2});
     // Installation offset (deg) per motor: the physical servo angle when the

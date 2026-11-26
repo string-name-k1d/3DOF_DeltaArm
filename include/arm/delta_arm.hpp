@@ -108,6 +108,19 @@ struct ArmMechConfig
   // low closure limit. It is still a diagnostic mode and still not a substitute
   // for real geometry, so do not treat a bypassed pose as reachable.
   bool bypass_reachability = false;
+
+  // TEMPORARY: the modelled reachable band is known to be inaccurate. While
+  // true, ik_stage2() does not refuse a pose because of that band and applies
+  // ONLY the servo's raw travel window [motor_angle_min, motor_angle_max] to the
+  // solved command; arm_from_motor() likewise inverts the 4-bar over the raw
+  // range instead of clamping to the band, so feedback agrees with what was
+  // commanded. Stage-1 circle misses are bypassed as well. The linkage must
+  // still be able to close (a NaN motor angle cannot be commanded).
+  //
+  // Set this to false to restore the band-based reachability guard once the
+  // geometry model has been corrected. See geometry.raw_motor_clamp in the
+  // controller parameters.
+  bool raw_motor_clamp = true;
 };
 
 /**
@@ -178,10 +191,10 @@ public:
   void get_motor_current(float out[3]) const;
   void get_motor_targets(float out[3]) const;
 
-  /// @brief Commanded motor angle (degrees) -> upper-arm angle (degrees),
-  ///        clamped to the limb's reachable band. This is the same conversion
-  ///        the forward estimate uses, so the visualiser and the controller can
-  ///        never disagree about a limb's arm angle. Never throws.
+  /// @brief Commanded motor angle (degrees) -> upper-arm angle (degrees). With
+  ///        ArmMechConfig::raw_motor_clamp on, the 4-bar is inverted over the raw
+  ///        range instead of clamping to the derived band, matching the command
+  ///        path. Otherwise clamped to the limb's reachable band. Never throws.
   float arm_angle_from_motor_deg(float motor_deg, int leg) const;
 
   /// @brief Reachable upper-arm angle band of a limb, in degrees, using the
@@ -241,9 +254,11 @@ private:
   ///        (the band edges are). Used to probe the band without throwing, so
   ///        nothing inside the forward estimate can propagate an exception.
   float motor_from_arm_unchecked(float theta_arm, int leg) const;
-  /// @brief Inverse 4-bar solve: motor angle (rad) -> arm angle (rad). Monotone
-  ///        bisection over the limb's reachable band; clamped to the band edges.
-  ///        Never throws.
+  /// @brief Inverse 4-bar solve: motor angle (rad) -> arm angle (rad). In raw
+  ///        clamp mode, the arm angle whose motor angle is closest to this one
+  ///        is found over the configured arm window (no band clamping);
+  ///        otherwise a monotone bisection over the limb's band, clamped to its
+  ///        edges. Never throws.
   float arm_from_motor(float motor_rad, int leg) const;
 
   /// @brief Nearest arm angle at which the 4-bar linkage physically closes.

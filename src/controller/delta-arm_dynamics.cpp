@@ -329,7 +329,9 @@ void Arm::set_geometry(const std::vector<ArmMechConfig>& configs) {
  * resolve the wrap, then 2-4 trim it down.
  *
  * Runs once per set_geometry(); both solves are hot paths, so the band is
- * cached rather than searched per call.
+ * cached rather than searched per call. While ArmMechConfig::raw_motor_clamp is
+ * on this band is only diagnostic (logged by the controller and used by the
+ * visualiser); ik_stage2() deliberately does not enforce it.
  */
 void Arm::compute_linkage_bands() {
     for (int leg = 0; leg < 3; ++leg) {
@@ -501,10 +503,14 @@ void Arm::ik_stage1(const Vec3& target) {
         // constant -90 deg offset from the paper's. That single constant is the
         // only difference between the two conventions.
         const float phi_i = c.plane_angle - kHalfPi;
+        // Raw motor-clamp mode also suppresses the circle-miss refusal: the
+        // modelled workspace is the part being corrected, so a target outside
+        // it must still produce a finite (tangent) limb angle to clamp.
+        const bool bypass = c.bypass_reachability || c.raw_motor_clamp;
         // Per-limb upper-arm angle in RADIANS.
         stage1_thetas_[leg] = delta_inverse_kinematics_arm(
             x, y, z, phi_i, c.base_radius, c.upper_arm_len,
-            c.lower_arm_len, c.platform_radius, c.bypass_reachability);
+            c.lower_arm_len, c.platform_radius, bypass);
     }
 }
 
@@ -557,6 +563,30 @@ float Arm::motor_from_arm_unchecked(float theta_arm, int leg) const {
  * physically cannot be anywhere else.
  */
 float Arm::arm_from_motor(float motor_rad, int leg) const {
+    if (configs_[leg].raw_motor_clamp) {
+        // Match the command path: the band is deliberately not consulted. Scan
+        // the configured arm window for the angle whose 4-bar motor angle is
+        // closest to this reading, so a motor driven past the modelled band
+        // still yields a sensible forward estimate. Angles where the linkage
+        // cannot close are skipped; the result is always finite.
+        const ArmMechConfig& c = configs_[leg];
+        constexpr int kSteps = 1440;
+        float best = c.arm_angle_min;
+        float best_err = std::numeric_limits<float>::infinity();
+        for (int i = 0; i <= kSteps; ++i) {
+            const float t = c.arm_angle_min +
+                (c.arm_angle_max - c.arm_angle_min) * (static_cast<float>(i) / kSteps);
+            const float m = four_bar_motor_angle(t, c);
+            if (std::isnan(m)) continue;
+            const float err = std::fabs(m - motor_rad);
+            if (err < best_err) {
+                best_err = err;
+                best = t;
+            }
+        }
+        return best;
+    }
+
     if (!band_valid_[leg]) {
         // No reachable arm angle on this limb. The IK refuses every pose, so
         // the only job here is to stay finite and deterministic.
@@ -602,6 +632,34 @@ float Arm::nearest_closeable_arm_angle(float theta_arm, int leg) const {
 }
 
 float Arm::ik_stage2(float theta, int leg) {
+    const ArmMechConfig& c = configs_[leg];
+
+    // TEMPORARY raw-motor mode: the modelled band (linkage closure run,
+    // monotonicity, servo window and arm window) has proved inaccurate, so it
+    // is not used as a motion constraint here. The 4-bar must still close -
+    // a NaN motor angle cannot be commanded - so fall back to the nearest
+    // closeable arm angle when it does not. The only limit applied to the
+    // command is the servo's raw physical travel, which is what the driver
+    // enforces anyway. This makes the arm drivable through the modelled
+    // "invalid" region while hardware behaviour is being measured.
+    if (c.raw_motor_clamp) {
+        float arm_rad = theta;
+        if (std::isnan(four_bar_motor_angle(arm_rad, c))) {
+            arm_rad = nearest_closeable_arm_angle(arm_rad, leg);
+            if (std::isnan(arm_rad)) {
+                std::ostringstream os;
+                os << "leg " << leg << " cannot close at ANY arm angle in ["
+                   << (c.arm_angle_min * kRadToDeg) << ", "
+                   << (c.arm_angle_max * kRadToDeg)
+                   << "] deg; no motor command exists";
+                throw std::invalid_argument(os.str());
+            }
+        }
+        const float motor_rad = four_bar_motor_angle(arm_rad, c);
+        return std::clamp((motor_rad + c.home_offset) * kRadToDeg,
+                          c.motor_angle_min, c.motor_angle_max);
+    }
+
     // The band check is the reachable test. motor_from_arm() would only reject
     // arm angles outside the linkage's closure region; the band is tighter (it
     // also folds in the servo travel and the arm-angle window), so a pose the

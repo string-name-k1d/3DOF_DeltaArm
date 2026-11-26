@@ -56,12 +56,12 @@ void DeltaArmControllerNode::declareParams() {
     declare_parameter<double>("geometry.rod_spread", 8.0);
 
     // Travel limits. The servo's own mechanical travel (angle_min/angle_max, in
-    // degrees) is the same pair the motor driver clamps against; it bounds the
-    // IK so a pose is never commanded that the servo could not hold. The
-    // arm-angle window is an additional practical bound on the limb itself: a
-    // negative arm angle is mechanically possible on some assemblies but rarely
-    // useful, so it is excluded by default and can be re-enabled by setting
-    // geometry.arm_angle_min below zero.
+    // degrees) is the same pair the motor driver clamps against; in raw-clamp
+    // mode it is the only limit on the commanded motor angle. The arm-angle
+    // window is an additional practical bound on the limb itself when the
+    // band-based guard is restored: a negative arm angle is mechanically
+    // possible on some assemblies but rarely useful, so it is excluded by
+    // default and can be re-enabled by setting geometry.arm_angle_min < 0.
     const auto angle_min = declare_parameter<std::vector<double>>("geometry.angle_min", std::vector<double>{0.0, 0.0, 0.0});
     const auto angle_max =
         declare_parameter<std::vector<double>>("geometry.angle_max", std::vector<double>{145.0, 145.0, 145.0});
@@ -71,6 +71,11 @@ void DeltaArmControllerNode::declareParams() {
     // targets and resolves them to the nearest closeable arm angle. Default false
     // keeps the reachability guard ON. See ArmMechConfig::bypass_reachability.
     const bool bypass_reachability = declare_parameter<bool>("geometry.bypass_reachability", false);
+    // TEMPORARY: while true the reachability band is not enforced; the solved
+    // motor command is only clamped to the servo's raw travel window. Default
+    // on because the modelled band is known to be inaccurate. Set false to
+    // restore the guard once the geometry model has been corrected.
+    const bool raw_motor_clamp = declare_parameter<bool>("geometry.raw_motor_clamp", true);
     constexpr double kDegToRad = 0.017453292519943295;
 
     simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
@@ -104,12 +109,23 @@ void DeltaArmControllerNode::declareParams() {
             .plane_angle = static_cast<float>(leg * kTwoPiOver3),
             .home_offset = 0.0f,
             .bypass_reachability = bypass_reachability,
+            .raw_motor_clamp = raw_motor_clamp,
         };
         configs.push_back(c);
     }
     arm_.set_geometry(configs);
-    RCLCPP_WARN(get_logger(), "geometry.bypass_reachability=%s (reachability guard is %s)", bypass_reachability ? "true" : "false",
-                bypass_reachability ? "DISABLED - out-of-envelope targets are clamped, not refused" : "ON");
+    if (raw_motor_clamp) {
+        RCLCPP_WARN(get_logger(),
+                    "geometry.raw_motor_clamp=true (TEMPORARY): IK band constraints are DISABLED; "
+                    "motor commands are clamped only to [%.1f, %.1f] deg raw travel",
+                    angle_min.empty() ? 0.0 : angle_min.front(),
+                    angle_max.empty() ? 145.0 : angle_max.front());
+    } else {
+        RCLCPP_INFO(get_logger(), "geometry.raw_motor_clamp=false (reachability band is enforced)");
+    }
+    if (bypass_reachability) {
+        RCLCPP_WARN(get_logger(), "geometry.bypass_reachability=true (stage-1 workspace misses are tangent-clamped)");
+    }
 
     // Start the arm at a valid (IK-reachable) posture instead of the degenerate
     // (0,0,0). The commanded pose becomes the streamed pose in sim mode.

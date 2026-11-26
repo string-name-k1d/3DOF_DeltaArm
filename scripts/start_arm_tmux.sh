@@ -118,10 +118,16 @@ for env_file in "${ENV_FILES[@]}"; do
   ENV_STEP+=". $(q "$env_file") && "
 done
 
+# Make the serial port explicit in every pane command. The launch file also
+# turns SERIAL_DEVICE into a node parameter so an installed params file with a
+# hardcoded port_name cannot silently win over .env.
+PORT_STEP=""
+[ -n "${SERIAL_DEVICE:-}" ] && PORT_STEP="export SERIAL_DEVICE=$(q "$SERIAL_DEVICE") && "
+
 # A caller may already have ROS overlays active; clear them so the two sources
 # below are the only ones that shape each pane's environment.
 CLEAN_ENV="unset BASH_ENV AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH PYTHONPATH LD_LIBRARY_PATH ROS_DISTRO ROS_VERSION ROS_PYTHON_VERSION; "
-PREFIX="cd $(q "$ARM_DIR") && ${CLEAN_ENV}${ENV_STEP}. $(q "$SETUP_PATH") && "
+PREFIX="cd $(q "$ARM_DIR") && ${CLEAN_ENV}${ENV_STEP}${PORT_STEP}. $(q "$SETUP_PATH") && "
 
 # control:=false disables the action server, so there is nothing to wait for.
 motion=1
@@ -161,6 +167,11 @@ if [ "$session_exists" = 0 ]; then
   echo "start_arm_tmux.sh: arm    = $ARM_DIR"
   echo "start_arm_tmux.sh: env    = ${ENV_FILES[*]:-(none)}"
   echo "start_arm_tmux.sh: setup  = $SETUP_PATH"
+  if [ -n "${SERIAL_DEVICE:-}" ]; then
+    echo "start_arm_tmux.sh: port   = $SERIAL_DEVICE (SERIAL_DEVICE)"
+  else
+    echo "start_arm_tmux.sh: port   = (unset; driver default /dev/ttyUSB0)"
+  fi
   if [ -n "$PARAMS" ]; then
     echo "start_arm_tmux.sh: params = $PARAMS"
   else

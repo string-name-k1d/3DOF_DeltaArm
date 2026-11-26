@@ -39,9 +39,16 @@ def generate_launch_description():
         'enable_motion': enable_motion,
         'publish_joints': publish_joints_flag,
     }]
+    # Serial port is a per-machine setting from .env (SERIAL_DEVICE). Apply it
+    # AFTER the YAML so a stale/hardcoded port_name in an installed params file
+    # cannot override it. The driver node also reads SERIAL_DEVICE as a
+    # fallback when no launch override is present.
+    serial_device = os.environ.get('SERIAL_DEVICE', '')
     driver_params = [params_file, {
         'enable_motion': enable_motion,
     }]
+    if serial_device:
+        driver_params.append({'port_name': serial_device})
 
     return LaunchDescription([
         DeclareLaunchArgument(

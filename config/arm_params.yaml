@@ -104,6 +104,17 @@ arm_controller:
       arm_angle_min: 0.0
       arm_angle_max: 180.0
 
+      # raw_motor_clamp: TEMPORARY while the workspace model is being corrected.
+      #   true (default) = do NOT refuse poses based on the derived reachable
+      #     band (linkage closure run / monotonicity / servo window / arm
+      #     window). Stage-1 circle misses are tangent-clamped instead of
+      #     rejected, and the solved motor command is clamped ONLY to the raw
+      #     servo travel [angle_min, angle_max] - the same clamp the driver
+      #     applies. The forward estimate inverts the 4-bar over the raw range
+      #     so it agrees with what was commanded.
+      #   false = restore the band-based reachability guard.
+      raw_motor_clamp: true
+
       # motor_positions / platform_offsets: optional explicit joint positions
       #   in the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2].
       #   When absent they are derived from base_radius / platform_radius: an
@@ -167,3 +178,11 @@ arm_manual_control:
     # step: manual-control step size (m) applied per key press.
     #   W/S drive target y, A/D drive x, Z/X drive z.
     step: 0.01
+    # Every key press starts from the last MEASURED pose from arm/pos, so a
+    # target the controller rejects is never used as the origin of the next
+    # step (holding a key cannot push the target further into an invalid area).
+    # pos_min / pos_max: OPTIONAL hard task-space clamp in metres [x,y,z].
+    # Uncomment both to constrain manual targets to a box; leave commented to
+    # rely on the measured-pose anchor alone.
+    # pos_min: [-0.30, -0.30, -0.50]
+    # pos_max: [0.30, 0.30, 0.0]

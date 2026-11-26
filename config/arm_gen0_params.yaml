@@ -91,6 +91,14 @@ arm_controller:
       #   pose exists to command. Set back to false to restore the guard.
       bypass_reachability: true
 
+      # raw_motor_clamp: TEMPORARY while the workspace model is being corrected.
+      #   true (default) = ignore the derived reachable band entirely and clamp
+      #     the solved motor command ONLY to the raw servo travel
+      #     [angle_min, angle_max] (also used by the forward estimate). This
+      #     supersedes the band-intersection clamp used by bypass_reachability.
+      #   false = restore the band-based reachability guard.
+      raw_motor_clamp: true
+
       # motor_positions / platform_offsets: optional explicit joint positions
       #   in the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2].
       #   When absent they are derived from base_radius / platform_radius: an
@@ -156,3 +164,9 @@ arm_manual_control:
     axis0: "z"
     # axis1: component of the target position the second key pair drives ("y").
     axis1: "y"
+    # Every key press starts from the last measured pose from arm/pos, so a
+    # rejected target is never used as the origin of the next step.
+    # Optional hard task-space clamp (metres [x,y,z]); enable by uncommenting
+    # both lines.
+    # pos_min: [-0.30, -0.30, -0.50]
+    # pos_max: [0.30, 0.30, 0.0]

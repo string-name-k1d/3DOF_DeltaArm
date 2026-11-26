@@ -227,10 +227,15 @@ ros2 launch arm manual.launch.py
 ```
 
 Manual keys: W/S move y, A/D move x, Z/X move z, Q quits. The `step` parameter
-sets metres per keypress. The node puts the terminal into single-keypress mode
-itself, so it works from a local TTY or an `ssh -t` session; `ros2 launch` does
-not forward stdin to child nodes, so start it with `ros2 run arm arm_manual`
-against an already running stack.
+sets metres per keypress. Every step starts from the **last measured pose** on
+`arm/pos`, not from an accumulated commanded target, so a target the controller
+rejects cannot become the origin of the next step: holding a key never pushes
+the target further into an invalid area. Optional `pos_min`/`pos_max` parameters
+under `arm_manual_control` add a hard task-space clamp (metres, `[x,y,z]`).
+The node puts the terminal into single-keypress mode itself, so it works from a
+local TTY or an `ssh -t` session; `ros2 launch` does not forward stdin to child
+nodes, so start it with `ros2 run arm arm_manual` against an already running
+stack.
 
 For real hardware, `scripts/start_arm_tmux.sh` creates the tmux windows and
 runs every arm process locally on the miniPC (no SSH):
@@ -276,10 +281,30 @@ ros2 topic echo arm/MotorFeedback
   `reach_timeout`, plus the shared `geometry.*` and `sim.*` blocks.
 - `arm_motor_driver`: `baudrate`, `servo_ids`, `start_angles`,
   `angle_min`/`angle_max`, `max_speed`, `auto_init`, `targets_topic`,
-  `offline_streak`. Its `port_name` is not in the YAML: it defaults to
-  `SERIAL_DEVICE` from `.env` (fallback `/dev/ttyUSB0`). An explicit
-  `port_name` parameter still overrides it.
-- `arm_manual_control`: `step`.
+  `offline_streak`. Its `port_name` is deliberately not set in the source YAML:
+  `arm_bringup.launch.py` applies `SERIAL_DEVICE` from `.env` to the driver
+  node after loading the YAML (fallback `/dev/ttyUSB0` when unset). This also
+  overrides a hardcoded `port_name` left in an older installed params file.
+  Rebuild (`colcon build --symlink-install --packages-select arm`) after
+  changing `.env` isn't needed for the launch override, but is needed if the
+  installed YAML itself is stale.
+- `arm_manual_control`: `step`, plus optional `pos_min`/`pos_max` (task-space
+  clamp for manual targets).
+
+### Temporary raw motor clamp
+
+`geometry.raw_motor_clamp` (default **true**) is a temporary mode while the
+modelled reachable band is known to be inaccurate. With it on the IK no longer
+refuses a pose because of that band: stage-1 circle misses are tangent-clamped,
+the 4-bar band/monotonicity/arm-window checks are skipped, and the solved motor
+command is clamped only to the raw servo travel
+`geometry.angle_min`/`angle_max` - the same window the driver enforces. The
+forward estimate inverts the 4-bar over the raw range so it agrees with the
+commanded (or measured) motor angles instead of pinning to the band edge.
+Set `geometry.raw_motor_clamp: false` in the params file to restore the
+band-based reachability guard once the geometry model has been corrected.
+`geometry.bypass_reachability` remains a narrower diagnostic switch for stage-1
+misses; in raw mode it is redundant.
 
 `enable_motion` is deliberately **not** a config-file parameter. The launch
 `control:=true|false` argument sets it for the controller and driver at runtime;

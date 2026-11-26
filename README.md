@@ -232,24 +232,23 @@ itself, so it works from a local TTY or an `ssh -t` session; `ros2 launch` does
 not forward stdin to child nodes, so start it with `ros2 run arm arm_manual`
 against an already running stack.
 
-For real hardware, `scripts/start_arm_tmux.sh` creates the tmux windows on
-**this** machine (the Ground Station) while every arm process runs on the
-Jetson over SSH:
+For real hardware, `scripts/start_arm_tmux.sh` creates the tmux windows and
+runs every arm process locally on the miniPC (no SSH):
 
-- `arm` window: hardware launch + `arm_manual` (pane 1 uses `ssh -t`)
+- `arm` window: hardware launch + `arm_manual` (local TTY)
 - `feedback` window: `/arm/pos` + `/arm/MotorFeedback` echoes
 
-Each pane runs `cd <remote dir> && . ./.env && <command>` on the Jetson, so
-`ROS_DISTRO`, `SERIAL_DEVICE`, `ARM_PARAMS_FILE`, X11 settings, etc. all come
-from the **Jetson's** `.env`; nothing is sourced from this laptop's `.env`.
-Only the SSH target is local (`ARM_REMOTE`, `ARM_REMOTE_DIR`):
+Each pane sources this machine's `.env` files and then
+`<workspace>/install/setup.bash`, so `SERIAL_DEVICE`, `ARM_PARAMS_FILE`,
+X11 settings, etc. all come from the miniPC's own `.env`. The workspace root
+is auto-detected from the repo location (`<ws>/src/...`) or can be set with
+`ARM_WS` in `.env`.
 
 ```bash
-./scripts/start_arm_tmux.sh                          # host tegra-ubuntu
-./scripts/start_arm_tmux.sh --host nvidia@tegra-ubuntu --dir ~/arm_ws/src/fyp
-./scripts/start_arm_tmux.sh control:=false           # observe only, no motion
-tmux kill-session -t arm                             # stop tmux on this PC
-ssh tegra-ubuntu 'cd ~/arm_ws/src/fyp && . ./.env && ./scripts/stop_sim.sh'
+./scripts/start_arm_tmux.sh                # local session "arm"
+./scripts/start_arm_tmux.sh control:=false # observe only, no motion
+tmux kill-session -t arm                   # stop tmux on the miniPC
+./scripts/stop_sim.sh                      # clear any surviving nodes
 ```
 
 `start_tmux.sh` in the fyp workspace calls the same helper with

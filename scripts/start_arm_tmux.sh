@@ -1,32 +1,27 @@
 #!/usr/bin/env bash
-# Real-hardware delta arm in a tmux session that runs on THIS machine; every
-# arm process itself runs on the Jetson, reached over SSH.
+# Real-hardware delta arm in a tmux session that runs on THIS machine (the
+# miniPC). Every arm process runs locally: no SSH, no remote tmux.
 #
-#   ./scripts/start_arm_tmux.sh                        # local session "arm"
-#   ./scripts/start_arm_tmux.sh control:=false         # feedback only (no motion)
-#   ./scripts/start_arm_tmux.sh --host nvidia@jetson   # override SSH target
-#   ./scripts/start_arm_tmux.sh --dir ~/arm_ws/src/fyp
+#   ./scripts/start_arm_tmux.sh                     # local session "arm"
+#   ./scripts/start_arm_tmux.sh control:=false      # feedback only (no motion)
 #   ./scripts/start_arm_tmux.sh --session fyp --no-attach   # used by start_tmux.sh
 #
-# Local tmux windows (each pane SSHes into the Jetson):
+# Local tmux windows:
 #   arm       pane 0: ros2 launch arm hardware.launch.py
-#             pane 1: arm_manual      (WASD + Z/X, Q quits; uses ssh -t)
+#             pane 1: arm_manual      (WASD + Z/X, Q quits; local TTY)
 #   feedback  pane 0: ros2 topic echo /arm/pos
 #             pane 1: ros2 topic echo /arm/MotorFeedback
 #
-# Only the SSH target is read from the local environment (ARM_REMOTE,
-# ARM_REMOTE_DIR). All arm runtime configuration (SERIAL_DEVICE,
-# ARM_PARAMS_FILE, X11, ...) comes from the Jetson's own .env, sourced by each
-# pane inside its SSH shell. Nothing is copied from this PC's .env. Each pane
-# clears inherited ROS environment first, then sources only that .env and
-# ~/arm_ws/install/setup.bash (which already chains the ROS underlay).
+# Each pane clears inherited ROS variables, then sources only this machine's
+# .env files and <workspace>/install/setup.bash (which chains the ROS
+# underlay). ROS config, serial device and params therefore all come from the
+# miniPC's own .env. Nothing is read from another host.
 #
-# The manual pane uses `ssh -t` and the node switches its terminal to
-# single-keypress mode, so keys work without Enter. `ros2 launch` is never
-# used for it because launch does not forward stdin.
+# The manual pane uses `ros2 run` because `ros2 launch` does not forward stdin;
+# the node puts the terminal into single-keypress mode itself.
 #
 # Stop:  tmux kill-session -t <session>
-#        ssh <host> 'cd <dir> && . ./.env && ./scripts/stop_sim.sh'
+#        ./scripts/stop_sim.sh   (from the arm package)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,69 +34,96 @@ usage() {
 die() { echo "start_arm_tmux.sh: $*" >&2; exit 2; }
 
 # --- options ----------------------------------------------------------------
-REMOTE="${ARM_REMOTE:-tegra-ubuntu}"
-REMOTE_DIR="${ARM_REMOTE_DIR:-arm_ws/src/fyp}"
-SESSION="${ARM_TMUX_SESSION:-arm}"
+SESSION=""
 WINDOW="arm"
 ATTACH=1
 LAUNCH_ARGS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help) usage; exit 0 ;;
-    --host)    [ $# -ge 2 ] || die "missing value for $1"; REMOTE="$2"; shift 2 ;;
-    --dir)     [ $# -ge 2 ] || die "missing value for $1"; REMOTE_DIR="$2"; shift 2 ;;
-    --session) [ $# -ge 2 ] || die "missing value for $1"; SESSION="$2"; shift 2 ;;
-    --window)  [ $# -ge 2 ] || die "missing value for $1"; WINDOW="$2"; shift 2 ;;
+    -h|--help)   usage; exit 0 ;;
+    --session)   [ $# -ge 2 ] || die "missing value for $1"; SESSION="$2"; shift 2 ;;
+    --window)    [ $# -ge 2 ] || die "missing value for $1"; WINDOW="$2"; shift 2 ;;
     --no-attach) ATTACH=0; shift ;;
-    --) shift; LAUNCH_ARGS+=("$@"); break ;;
-    -*) die "unknown option: $1" ;;
-    *) LAUNCH_ARGS+=("$1"); shift ;;
+    --)          shift; LAUNCH_ARGS+=("$@"); break ;;
+    -*)          die "unknown option: $1" ;;
+    *)           LAUNCH_ARGS+=("$1"); shift ;;
   esac
 done
 
 command -v tmux >/dev/null 2>&1 || die "tmux not installed (sudo apt install tmux)"
-command -v ssh >/dev/null 2>&1 || die "ssh not found"
-[ -n "$REMOTE" ] || die "empty SSH host (use --host or ARM_REMOTE)"
 
-# An SSH session starts in the remote home dir, so reduce ~/$HOME prefixes to
-# relative paths rather than letting our quoting escape them on the Jetson.
-case "$REMOTE_DIR" in
-  '~/'*)       REMOTE_DIR="${REMOTE_DIR#\~/}" ;;
-  '$HOME/'*)   REMOTE_DIR="${REMOTE_DIR#\$HOME/}" ;;
-esac
-
-# Word-safe quoting for the remote shell, then for the local shell.
-rq() { printf '%q' "$1"; }
-
-DIR_Q="$(rq "$REMOTE_DIR")"
-
-# The repo lives at <workspace>/src/fyp on the Jetson. Source exactly two
-# things there: its .env (SERIAL_DEVICE, ARM_PARAMS_FILE, X11, ...) and the
-# workspace-root install/setup.bash, which already chains the ROS underlay.
-# Calling run_arm.sh as a wrapper would re-source ROS and walk overlays again,
-# producing "not found: .../local_setup.bash" warnings from stale colcon hooks.
-REMOTE_WS="${ARM_REMOTE_WS:-}"
-if [ -z "$REMOTE_WS" ]; then
-  case "$REMOTE_DIR" in
-    */src/*) REMOTE_WS="${REMOTE_DIR%/src/*}" ;;
-    *)       REMOTE_WS="$REMOTE_DIR" ;;
-  esac
+# --- locate the arm package and workspace ----------------------------------
+# Works both from the arm submodule (arm/scripts/) and from the mirrored copy
+# in the fyp workspace (scripts/).
+PARENT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -d "$PARENT/arm" ]; then
+  REPO_DIR="$PARENT"
+  ARM_DIR="$PARENT/arm"
+else
+  ARM_DIR="$PARENT"
+  REPO_DIR="$(dirname "$PARENT")"
 fi
-case "$REMOTE_WS" in
-  /*) SETUP_PATH="$REMOTE_WS/install/setup.bash" ;;
-  *)  SETUP_PATH="\$HOME/$REMOTE_WS/install/setup.bash" ;;
-esac
 
-# Discard any ROS environment inherited from the ssh login shell (a ros2_ws
-# source in .bashrc/BASH_ENV is the usual culprit). Otherwise colcon chains
-# those stale prefixes and emits "not found: .../local_setup.bash" while never
-# adding arm_ws to AMENT_PREFIX_PATH. .env and the workspace setup restore
-# everything that is actually needed.
+# --- local configuration ----------------------------------------------------
+ENV_FILES=()
+[ -f "$REPO_DIR/.env" ] && ENV_FILES+=("$REPO_DIR/.env")
+[ -f "$ARM_DIR/.env" ]  && ENV_FILES+=("$ARM_DIR/.env")
+
+set -a
+for env_file in "${ENV_FILES[@]}"; do
+  # shellcheck disable=SC1090
+  . "$env_file"
+done
+set +a
+
+[ -n "$SESSION" ] || SESSION="${ARM_TMUX_SESSION:-arm}"
+
+# <workspace>/src/fyp is the normal layout. ARM_WS in .env overrides it.
+ARM_WS="${ARM_WS:-}"
+if [ -z "$ARM_WS" ]; then
+  src_dir="$(dirname "$REPO_DIR")"
+  if [ "$(basename "$src_dir")" = src ]; then
+    ARM_WS="$(dirname "$src_dir")"
+  else
+    ARM_WS="$HOME/arm_ws"
+  fi
+fi
+SETUP_PATH="$ARM_WS/install/setup.bash"
+[ -f "$SETUP_PATH" ] || die "workspace setup not found: $SETUP_PATH (set ARM_WS in .env)"
+
+# Optional params override. Relative paths resolve against the arm package.
+# When unset, the launch file and the node use their own defaults.
+PARAMS=""
+if [ -n "${ARM_PARAMS_FILE:-}" ]; then
+  case "$ARM_PARAMS_FILE" in
+    /*) PARAMS="$ARM_PARAMS_FILE" ;;
+    *)  PARAMS="$ARM_DIR/$ARM_PARAMS_FILE" ;;
+  esac
+  [ -f "$PARAMS" ] || die "parameter file not found: $PARAMS (fix ARM_PARAMS_FILE in .env)"
+fi
+
+if [ -x "$REPO_DIR/scripts/stop_sim.sh" ]; then
+  STOP_SIM="$REPO_DIR/scripts/stop_sim.sh"
+else
+  STOP_SIM="$ARM_DIR/stop_sim.sh"
+fi
+
+# --- pane commands ----------------------------------------------------------
+# %q makes every value safe to paste into a pane's shell.
+q() { printf '%q' "$1"; }
+
+ENV_STEP=""
+for env_file in "${ENV_FILES[@]}"; do
+  ENV_STEP+=". $(q "$env_file") && "
+done
+
+# A caller may already have ROS overlays active; clear them so the two sources
+# below are the only ones that shape each pane's environment.
 CLEAN_ENV="unset BASH_ENV AMENT_PREFIX_PATH COLCON_PREFIX_PATH CMAKE_PREFIX_PATH PYTHONPATH LD_LIBRARY_PATH ROS_DISTRO ROS_VERSION ROS_PYTHON_VERSION; "
-PREFIX="cd $DIR_Q && ${CLEAN_ENV}. ./.env && . $SETUP_PATH && "
+PREFIX="cd $(q "$ARM_DIR") && ${CLEAN_ENV}${ENV_STEP}. $(q "$SETUP_PATH") && "
 
-# control:=false disables the action server; there is nothing to wait for.
+# control:=false disables the action server, so there is nothing to wait for.
 motion=1
 for arg in "${LAUNCH_ARGS[@]}"; do
   case "$arg" in
@@ -109,42 +131,22 @@ for arg in "${LAUNCH_ARGS[@]}"; do
   esac
 done
 
-# The manual pane waits for the controller itself so this script never blocks
-# (important when it is called from start_tmux.sh). Only pass a params file
-# when the Jetson's .env actually sets ARM_PARAMS_FILE: the launch file and the
-# manual node both have working defaults, while a guessed relative path (e.g.
-# config/arm_params.yaml) does not exist from the repo root. The ${VAR:+...}
-# expansion is left literal here for the REMOTE shell to evaluate after .env.
+# The wait runs inside the pane, so launching never blocks this script.
 WAIT_ACTION="timeout 60 bash -c 'until ros2 action list 2>/dev/null | grep -qx /arm/set_pos; do sleep 1; done'"
+
+HW_LINE="${PREFIX}ros2 launch arm hardware.launch.py"
+[ -n "$PARAMS" ] && HW_LINE+=" params_file:=$(q "$PARAMS")"
+for arg in "${LAUNCH_ARGS[@]}"; do
+  HW_LINE+=" $(q "$arg")"
+done
+
 MANUAL_LINE="${PREFIX}"
 [ "$motion" = 1 ] && MANUAL_LINE+="${WAIT_ACTION} && "
-MANUAL_LINE+="ros2 run arm arm_manual \${ARM_PARAMS_FILE:+--ros-args --params-file \"\$ARM_PARAMS_FILE\"}"
+MANUAL_LINE+="ros2 run arm arm_manual"
+[ -n "$PARAMS" ] && MANUAL_LINE+=" --ros-args --params-file $(q "$PARAMS")"
 
-HW_LINE="${PREFIX}ros2 launch arm hardware.launch.py \${ARM_PARAMS_FILE:+params_file:=\"\$ARM_PARAMS_FILE\"}"
-for arg in "${LAUNCH_ARGS[@]}"; do
-  HW_LINE+=" $(rq "$arg")"
-done
 POS_LINE="${PREFIX}ros2 topic echo /arm/pos arm/msg/ArmPosition"
 FEEDBACK_LINE="${PREFIX}ros2 topic echo /arm/MotorFeedback arm/msg/MotorFeedback"
-
-# Build a local shell command for a tmux pane. $1=1 -> ssh -t (interactive).
-pane_cmd() {
-  local tty="$1" line="$2" inner wrapper
-  # ssh runs its command through the remote login shell first. Wrap ours in a
-  # clean bash so nothing else (e.g. a ros2_ws source in ~/.bashrc or BASH_ENV)
-  # is sourced before .env and <ws>/install/setup.bash.
-  inner="$(printf '%q' "$line")"
-  wrapper="env -u BASH_ENV bash --noprofile --norc -c $inner"
-  if [ "$tty" = 1 ]; then
-    printf 'ssh -t %q %q' "$REMOTE" "$wrapper"
-  else
-    printf 'ssh %q %q' "$REMOTE" "$wrapper"
-  fi
-}
-HW_PANE="$(pane_cmd 0 "$HW_LINE")"
-MANUAL_PANE="$(pane_cmd 1 "$MANUAL_LINE")"
-POS_PANE="$(pane_cmd 0 "$POS_LINE")"
-FEEDBACK_PANE="$(pane_cmd 0 "$FEEDBACK_LINE")"
 
 # --- session / windows ------------------------------------------------------
 session_exists=0
@@ -155,7 +157,15 @@ window_exists() {
 }
 
 if [ "$session_exists" = 0 ]; then
-  echo "start_arm_tmux.sh: creating local session '$SESSION' (host $REMOTE)"
+  echo "start_arm_tmux.sh: creating local session '$SESSION'"
+  echo "start_arm_tmux.sh: arm    = $ARM_DIR"
+  echo "start_arm_tmux.sh: env    = ${ENV_FILES[*]:-(none)}"
+  echo "start_arm_tmux.sh: setup  = $SETUP_PATH"
+  if [ -n "$PARAMS" ]; then
+    echo "start_arm_tmux.sh: params = $PARAMS"
+  else
+    echo "start_arm_tmux.sh: params = (launch defaults)"
+  fi
   tmux new-session -d -s "$SESSION" -n "$WINDOW"
 fi
 
@@ -170,11 +180,11 @@ else
   target="$SESSION:$WINDOW"
   tmux set-option -w -t "$target" pane-border-status top
   tmux set-option -w -t "$target" pane-border-format ' #{pane_title} '
-  tmux select-pane -t "$target.0" -T 'hardware (SSH: ros2 launch arm)'
-  tmux send-keys -t "$target.0" "$HW_PANE" C-m
+  tmux select-pane -t "$target.0" -T 'hardware (ros2 launch arm)'
+  tmux send-keys -t "$target.0" "$HW_LINE" C-m
   tmux split-window -h -t "$target"
-  tmux select-pane -t "$target.1" -T 'manual (SSH -t: WASD + Z/X, Q quits)'
-  tmux send-keys -t "$target.1" "$MANUAL_PANE" C-m
+  tmux select-pane -t "$target.1" -T 'manual (WASD + Z/X, Q quits)'
+  tmux send-keys -t "$target.1" "$MANUAL_LINE" C-m
 fi
 
 if window_exists "$SESSION" feedback; then
@@ -184,30 +194,23 @@ else
   target="$SESSION:feedback"
   tmux set-option -w -t "$target" pane-border-status top
   tmux set-option -w -t "$target" pane-border-format ' #{pane_title} '
-  tmux select-pane -t "$target.0" -T 'arm/pos (SSH)'
-  tmux send-keys -t "$target.0" "$POS_PANE" C-m
+  tmux select-pane -t "$target.0" -T 'arm/pos'
+  tmux send-keys -t "$target.0" "$POS_LINE" C-m
   tmux split-window -h -t "$target"
-  tmux select-pane -t "$target.1" -T 'arm/MotorFeedback (SSH)'
-  tmux send-keys -t "$target.1" "$FEEDBACK_PANE" C-m
+  tmux select-pane -t "$target.1" -T 'arm/MotorFeedback'
+  tmux send-keys -t "$target.1" "$FEEDBACK_LINE" C-m
 fi
 
-echo "start_arm_tmux.sh: remote config = ssh $REMOTE 'cd $REMOTE_DIR && . ./.env'"
-if [ "$ATTACH" = 1 ]; then
-  echo "start_arm_tmux.sh: stop with tmux kill-session -t $SESSION, then:"
-else
-  echo "start_arm_tmux.sh: stop with tmux kill-window -t $SESSION:$WINDOW and"
-  echo "                   tmux kill-window -t $SESSION:feedback, then:"
-fi
-echo "  ssh $REMOTE 'cd $REMOTE_DIR && . ./.env && ./scripts/stop_sim.sh'"
+echo "start_arm_tmux.sh: stop with tmux kill-session -t $SESSION, then:"
+echo "  $STOP_SIM"
 
 [ "$ATTACH" = 1 ] || exit 0
 
+# Leave the user on the manual pane so keys go straight to the node.
+tmux select-window -t "$SESSION:$WINDOW"
+tmux select-pane -t "$SESSION:$WINDOW.1"
 if [ -n "${TMUX:-}" ]; then
-  tmux select-window -t "$SESSION:$WINDOW"
-  tmux select-pane -t "$SESSION:$WINDOW.1"
   exec tmux switch-client -t "$SESSION"
 else
-  tmux select-window -t "$SESSION:$WINDOW"
-  tmux select-pane -t "$SESSION:$WINDOW.1"
   exec tmux attach -t "$SESSION"
 fi

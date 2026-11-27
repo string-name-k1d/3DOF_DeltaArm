@@ -23,7 +23,6 @@ namespace
 
 using Vec3 = std::array<double, 3>;
 
-// Unit task-space displacement for each keyboard direction.
 const std::array<std::pair<char, Vec3>, 6> kKeyDirections{{
   {'w', {0.0, 1.0, 0.0}},
   {'s', {0.0, -1.0, 0.0}},
@@ -33,17 +32,13 @@ const std::array<std::pair<char, Vec3>, 6> kKeyDirections{{
   {'x', {0.0, 0.0, -1.0}},
 }};
 
-// Puts the controlling terminal into single-keypress mode (no Enter, no echo)
-// for the lifetime of the object and restores it on destruction. Without this
-// the terminal stays canonical over SSH/plain shells: keys are echoed but only
-// delivered after Enter, so the node appears to ignore them.
 class TerminalMode
 {
 public:
   TerminalMode()
   {
 #if defined(_WIN32)
-    raw_ = true;  // _getch() already reads single keys.
+    raw_ = true;
 #else
     if (::isatty(STDIN_FILENO) == 0 || ::tcgetattr(STDIN_FILENO, &saved_) != 0) {
       return;
@@ -79,8 +74,6 @@ private:
 #endif
 };
 
-// Wait up to 200 ms for one key, so rclcpp shutdown (Ctrl-C) is still noticed
-// while no key is pressed. Returns -1 on EOF/error or shutdown.
 int read_key()
 {
 #if defined(_WIN32)
@@ -94,32 +87,19 @@ int read_key()
       if (errno == EINTR) continue;
       return -1;
     }
-    if (rc == 0) continue;  // timeout
+    if (rc == 0) continue;
 
     const ssize_t n = ::read(STDIN_FILENO, &c, 1);
     if (n == 1) return c;
     if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
-    return -1;  // stdin closed
+    return -1;
   }
   return -1;
 #endif
 }
 
-}  // namespace
+}
 
-/**
- * @brief Standalone manual-control (WASD + Z/X) driver.
- *
- * Spins the ManualControlNode in a background thread, then reads keys in the
- * foreground and sends set_pos goals relative to the last commanded target:
- *
- *   W / S : target y +/-  (horizontal plane, forward / back)
- *   A / D : target x -/+  (horizontal plane, left / right)
- *   Z / X : target z +/-  (vertical, up / down)
- *   Q     : quit
- *
- * Current-position changes are printed by the node from the arm/pos topic.
- */
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
@@ -137,8 +117,8 @@ int main(int argc, char ** argv)
     std::printf("  keys act immediately (single keypress, no Enter)\n");
   } else {
     std::printf("  WARNING: stdin is not an interactive terminal.\n");
-    std::printf("           Run this node directly (not via ros2 launch) in a local\n");
-    std::printf("           or `ssh -t` session; keys may need Enter here.\n");
+    std::printf("           Run this node directly (not via ros2 launch) in an\n");
+    std::printf("           interactive terminal; keys may need Enter here.\n");
   }
   std::printf("\n");
   std::fflush(stdout);

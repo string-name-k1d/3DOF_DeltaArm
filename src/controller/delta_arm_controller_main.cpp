@@ -5,13 +5,6 @@
 
 #include "arm/delta_arm_controller.hpp"
 
-/**
- * @brief Controller entry point.
- *
- * Runs the task-space controller as its own process. It publishes motor
- * targets for the separate driver node (or an external simulation) and
- * exposes the same interfaces in both simulation and hardware mode.
- */
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);

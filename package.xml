@@ -4,11 +4,7 @@
   <name>arm</name>
   <version>0.1.0</version>
   <description>
-    Minimal 3DOF delta arm package. Provides the custom SetPosition action,
-    ArmPosition / MotorTargets / MotorFeedback messages, the two-stage
-    inverse-kinematics controller node (set_pos action + arm/pos feedback
-    topic), the FashionStart UART-servo motor driver (arm/motor_targets ->
-    arm/MotorFeedback), and an optional 2-D SFML visualiser.
+    3DOF delta arm: IK controller, servo driver, and optional 2-D visualiser.
   </description>
   <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
   <license>Apache-2.0</license>
@@ -26,9 +22,6 @@
   <exec_depend>rosidl_default_runtime</exec_depend>
   <test_depend>ament_cmake_gtest</test_depend>
 
-  <!-- The 2-D SFML visualiser (arm_sim_sfml) is optional. SFML is deliberately
-       not declared here so `rosdep install` and a plain `colcon build` work on
-       machines without it. Install libsfml-dev manually to build the 2-D view. -->
   <exec_depend>ros2launch</exec_depend>
 
   <member_of_group>rosidl_interface_packages</member_of_group>

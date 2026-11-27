@@ -1,36 +1,21 @@
 #!/usr/bin/env bash
-# One-time setup for the arm package (Ubuntu 22.04 + ROS 2 Humble).
-#
-#   ./scripts/setup.sh                                    # build with .env
-#   ./scripts/setup.sh --event-handlers console_direct+   # extra colcon args
-#
-# Requires .env (copy and edit .env.example first), installs the optional
-# add-ons selected in .env (ARM_INSTALL_GAZEBO / ARM_INSTALL_ROSBRIDGE), and
-# builds the workspace. Re-running is safe.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 REPO="$PWD"
 
-# Per-machine configuration. Create it explicitly so the example paths are
-# never applied by accident.
 if [ ! -f .env ]; then
   echo "setup.sh: .env not found." >&2
   echo "  cp .env.example .env    # then edit ARM_WS for this machine" >&2
   exit 1
 fi
-# shellcheck disable=SC1091
 . ./.env
 
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then SUDO=sudo; fi
 
-# shellcheck disable=SC1090
 source "/opt/ros/${ROS_DISTRO}/setup.bash"
 
-# Workspace root: ARM_WS from .env, else walk up until this repo sits under
-# <candidate>/src/ (arm_ws/src/fyp/arm -> arm_ws). A standalone checkout (repo
-# root IS the package) falls back to the repo root, which colcon accepts.
 if [ -n "${ARM_WS:-}" ]; then
   if [ ! -d "$ARM_WS" ]; then
     echo "setup.sh: ARM_WS='$ARM_WS' is not a directory." >&2
@@ -48,7 +33,6 @@ else
   done
 fi
 
-# Optional: 3-D Gazebo Harmonic stack (the `3d` launch mode).
 if [ "${ARM_INSTALL_GAZEBO:-0}" = "1" ]; then
   GZ_KEYRING=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg
   GZ_STABLE_LIST=/etc/apt/sources.list.d/gazebo-stable.list
@@ -83,7 +67,6 @@ if [ "${ARM_INSTALL_GAZEBO:-0}" = "1" ]; then
   fi
 fi
 
-# Optional: rosbridge_suite for browser/WebSocket clients.
 if [ "${ARM_INSTALL_ROSBRIDGE:-0}" = "1" ]; then
   if dpkg -s ros-humble-rosbridge-suite >/dev/null 2>&1; then
     echo "rosbridge_suite already installed; skipping."
@@ -103,9 +86,6 @@ echo "setup.sh: packages = $PACKAGES"
 
 cd "$WS"
 
-# Extra arguments come before the package/CMake options so they are parsed as
-# colcon options rather than being consumed by --cmake-args.
-# shellcheck disable=SC2086  # PACKAGES is intentionally word-split.
 colcon build "$@" --symlink-install --packages-select $PACKAGES \
   --cmake-args "-DARM_BUILD_SFML_SIM=$SFML_SIM"
 

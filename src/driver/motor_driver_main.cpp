@@ -5,12 +5,6 @@
 
 #include "arm/motor_driver_node.hpp"
 
-/**
- * @brief Motor-driver entry point.
- *
- * Runs the hardware driver as its own process. The controller is launched
- * separately and talks to it over arm/motor_targets and arm/MotorFeedback.
- */
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);

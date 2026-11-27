@@ -37,16 +37,13 @@ void DeltaArmControllerNode::declareParams() {
     reach_tolerance_ = declare_parameter<double>("reach_tolerance", 0.005);
     reach_timeout_ = declare_parameter<double>("reach_timeout", 10.0);
 
-    // Mechanism geometry (mm) - shared with the visualisers via arm_params.yaml.
+
     const double base_radius = declare_parameter<double>("geometry.base_radius", 100.0);
     const double platform_radius = declare_parameter<double>("geometry.platform_radius", 32.5);
     const double upper_arm_len = declare_parameter<double>("geometry.upper_arm_len", 120.0);
     const double lower_arm_len = declare_parameter<double>("geometry.lower_arm_len", 240.0);
 
-    // 4-bar servo-linkage geometry (see ArmMechConfig): the servo drives the
-    // upper arm through a horn + rigid rod, mapped by the exact circle-circle
-    // solve in ik_stage2. c = hypot(arm_attach_dist, arm_attach_offset); the
-    // ground link d runs servo -> shoulder.
+
     const double servo_radius = declare_parameter<double>("geometry.servo_radius", 57.65);
     const double servo_z = declare_parameter<double>("geometry.servo_z", -22.5);
     const double upper_rod_len = declare_parameter<double>("geometry.upper_rod_len", 60.0);
@@ -55,41 +52,32 @@ void DeltaArmControllerNode::declareParams() {
     const double arm_attach_offset = declare_parameter<double>("geometry.arm_attach_offset", 20.5);
     declare_parameter<double>("geometry.rod_spread", 8.0);
 
-    // Travel limits. The servo's own mechanical travel (angle_min/angle_max, in
-    // degrees) is the same pair the motor driver clamps against; in raw-clamp
-    // mode it is the only limit on the commanded motor angle. The arm-angle
-    // window is an additional practical bound on the limb itself when the
-    // band-based guard is restored: a negative arm angle is mechanically
-    // possible on some assemblies but rarely useful, so it is excluded by
-    // default and can be re-enabled by setting geometry.arm_angle_min < 0.
+
     const auto angle_min = declare_parameter<std::vector<double>>("geometry.angle_min", std::vector<double>{0.0, 0.0, 0.0});
     const auto angle_max =
         declare_parameter<std::vector<double>>("geometry.angle_max", std::vector<double>{145.0, 145.0, 145.0});
     const double arm_angle_min = declare_parameter<double>("geometry.arm_angle_min", 0.0);
     const double arm_angle_max = declare_parameter<double>("geometry.arm_angle_max", 180.0);
-    // Diagnostic escape hatch: when true the IK stops refusing out-of-envelope
-    // targets and resolves them to the nearest closeable arm angle. Default false
-    // keeps the reachability guard ON. See ArmMechConfig::bypass_reachability.
+
+
     const bool bypass_reachability = declare_parameter<bool>("geometry.bypass_reachability", false);
-    // TEMPORARY: while true the reachability band is not enforced; the solved
-    // motor command is only clamped to the servo's raw travel window. Default
-    // on because the modelled band is known to be inaccurate. Set false to
-    // restore the guard once the geometry model has been corrected.
+
+
     const bool raw_motor_clamp = declare_parameter<bool>("geometry.raw_motor_clamp", true);
     constexpr double kDegToRad = 0.017453292519943295;
 
     simulate_arrival_ = declare_parameter<bool>("sim.simulate_arrival", true);
-    // Runtime-only switches: launch files set these; config/*.yaml must not.
+
     enable_motion_ = declare_parameter<bool>("enable_motion", true);
     publish_joints_ = declare_parameter<bool>("publish_joints", false);
     const auto initial =
         declare_parameter<std::vector<double>>("sim.initial_pos", std::vector<double>{0.0, 0.0, -0.30});
 
     std::vector<DeltaArm::ArmMechConfig> configs;
-    constexpr double kTwoPiOver3 = 2.0943951023931953; // 120 deg
+    constexpr double kTwoPiOver3 = 2.0943951023931953;
     for (int leg = 0; leg < 3; ++leg) {
-        // The limits are per-limb in the config; the parameter arrays are
-        // shorter-tolerant than the YAML suggests, so fall back per index.
+
+
         const size_t idx = static_cast<size_t>(leg);
         DeltaArm::ArmMechConfig c{
             .base_radius = static_cast<float>(base_radius),
@@ -127,8 +115,7 @@ void DeltaArmControllerNode::declareParams() {
         RCLCPP_WARN(get_logger(), "geometry.bypass_reachability=true (stage-1 workspace misses are tangent-clamped)");
     }
 
-    // Start the arm at a valid (IK-reachable) posture instead of the degenerate
-    // (0,0,0). The commanded pose becomes the streamed pose in sim mode.
+
     if (initial.size() == 3) {
         const float ix = static_cast<float>(initial[0]);
         const float iy = static_cast<float>(initial[1]);
@@ -159,9 +146,7 @@ void DeltaArmControllerNode::declareParams() {
                 "attach=%.1f offset=%.1f",
                 servo_radius, servo_z, upper_rod_len, servo_rod_len, arm_attach_dist, arm_attach_offset);
 
-    // Report the resolved reachable arm-angle band: it is derived, so a
-    // surprising workspace is far easier to diagnose from the log than by
-    // probing the arm.
+
     for (int leg = 0; leg < 3; ++leg) {
         float lo_deg = 0.0f;
         float hi_deg = 0.0f;
@@ -201,8 +186,8 @@ void DeltaArmControllerNode::setupMotorFeedback() {
 
 void DeltaArmControllerNode::setupPositionFeedback() {
     pos_pub_ = create_publisher<arm::msg::ArmPosition>("arm/pos", 10);
-    // Debug-only joint topic, requested by the 2-D visualiser. The endpoint
-    // lives on arm/pos; hardware/3-D runs do not need this extra stream.
+
+
     if (publish_joints_) {
         joints_pub_ = create_publisher<sensor_msgs::msg::JointState>("arm/joints", 10);
     }
@@ -215,16 +200,13 @@ void DeltaArmControllerNode::setupPositionFeedback() {
                 publish_joints_ ? " + arm/joints (2-D debug)" : "", feedback_rate_);
 }
 
-// ---------------------------------------------------------------------------
-// set_pos action server
-// ---------------------------------------------------------------------------
-rclcpp_action::GoalResponse DeltaArmControllerNode::handleGoal(const rclcpp_action::GoalUUID& /*uuid*/,
-                                                               std::shared_ptr<const SetPosition::Goal> /*goal*/) {
+rclcpp_action::GoalResponse DeltaArmControllerNode::handleGoal(const rclcpp_action::GoalUUID& ,
+                                                               std::shared_ptr<const SetPosition::Goal> ) {
     RCLCPP_INFO(get_logger(), "set_pos goal received - accepting");
     return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
 }
 
-rclcpp_action::CancelResponse DeltaArmControllerNode::handleCancel(const std::shared_ptr<GoalHandle> /*goal_handle*/) {
+rclcpp_action::CancelResponse DeltaArmControllerNode::handleCancel(const std::shared_ptr<GoalHandle> ) {
     RCLCPP_INFO(get_logger(), "set_pos goal cancelled");
     return rclcpp_action::CancelResponse::ACCEPT;
 }
@@ -242,17 +224,15 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
 
     RCLCPP_INFO(get_logger(), "set_pos -> (%.3f, %.3f, %.3f)", x, y, z);
 
-    // Stage the task-space target and run the (two-stage) IK. The result is
-    // published to the driver on arm/motor_targets.
+
     DeltaArm::TargetResult reach;
     {
         std::lock_guard<std::mutex> lock(arm_mutex_);
         reach = arm_.set_tar_pos(x, y, z);
     }
     if (!reach.reached) {
-        // Reporting success here used to make an unreachable goal look exactly
-        // like a dead motor: the arm simply did not move. Abort instead, and
-        // name the target so the caller can see WHICH pose was refused.
+
+
         RCLCPP_WARN(get_logger(), "set_pos REJECTED (%.3f, %.3f, %.3f) m: %s", x, y, z, reach.reason.c_str());
         auto result = std::make_shared<SetPosition::Result>();
         result->status = SetPosition::Result::STATUS_UNREACHABLE;
@@ -269,9 +249,7 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
     }
     publishTargets(angles);
 
-    // Sim mode: with no motor feedback yet, promote the commanded target to the
-    // current pose immediately so the arm/pos stream and visualiser show the
-    // requested motion. Once real feedback is seen, wait for the measured pose.
+
     if (!feedback_seen_.load() && simulate_arrival_) {
         std::lock_guard<std::mutex> lock(arm_mutex_);
         arm_.apply();
@@ -298,8 +276,7 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
             tar = arm_.get_tar_pos();
         }
 
-        // A newer set_pos goal replaces the commanded target. Abort this one
-        // instead of waiting for a pose the arm is no longer aiming at.
+
         if (std::fabs(static_cast<double>(tar.x) - x) > 1e-6 ||
             std::fabs(static_cast<double>(tar.y) - y) > 1e-6 ||
             std::fabs(static_cast<double>(tar.z) - z) > 1e-6) {
@@ -348,9 +325,6 @@ void DeltaArmControllerNode::executeAction(const std::shared_ptr<GoalHandle> goa
     }
 }
 
-// ---------------------------------------------------------------------------
-// arm/pos (+ optional arm/joints debug) feedback
-// ---------------------------------------------------------------------------
 void DeltaArmControllerNode::clearGoal(const std::shared_ptr<GoalHandle>& goal_handle) {
     std::lock_guard<std::mutex> lock(goal_mutex_);
     if (current_goal_handle_ == goal_handle)
@@ -403,7 +377,7 @@ void DeltaArmControllerNode::publishPosition() {
     msg->position.y = cur.y;
     msg->position.z = cur.z;
 
-    // Commanded target (control intent) so visualisers can mark it directly.
+
     msg->target_position.x = tar.x;
     msg->target_position.y = tar.y;
     msg->target_position.z = tar.z;
@@ -415,7 +389,7 @@ void DeltaArmControllerNode::publishPosition() {
 
     pos_pub_->publish(*msg);
 
-    // Debug-only joint state topic: current joint angles (degrees).
+
     if (joints_pub_) {
         auto js = std::make_shared<sensor_msgs::msg::JointState>();
         js->header.stamp = now();
@@ -426,4 +400,4 @@ void DeltaArmControllerNode::publishPosition() {
     }
 }
 
-} // namespace DeltaArmRos
+}

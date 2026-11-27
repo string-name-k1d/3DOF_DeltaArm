@@ -1,41 +1,22 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# launch_container.sh
-#
-# Host-side helper: launch the arm Docker container, open an interactive bash
-# inside it, and start the repo's run_arm.sh.
-#
-# Run from the host (outside the container), from anywhere:
-#
-#   scripts/launch_container.sh                 # real hardware + 2-D reference, control ON
-#   scripts/launch_container.sh --sim           # fake 2-D simulation, control ON
-#   scripts/launch_container.sh --hardware      # explicit hardware service (USB)
-#   scripts/launch_container.sh --foreground    # run_arm.sh in front; bash afterwards
-#   scripts/launch_container.sh -- <run_arm.sh args...>
-#
-# By default run_arm.sh is started in the background (logs in
-# /tmp/run_arm.log) so the bash prompt stays usable. Ctrl-D / exit in the
-# shell stops the container and the background launch.
-#
-# The host X11 display is forwarded (DISPLAY, /tmp/.X11-unix, XAUTHORITY) when
-# available, so `ros2 launch arm sim_2d.launch.py` opens its window from
-# inside the container. On a headless host choose a non-2-D mode explicitly,
-# e.g. `scripts/launch_container.sh -- simulation`.
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Per-machine defaults (DISPLAY, SERIAL_DEVICE, XAUTHORITY, ...) come from the
-# sourced environment: source .env first. Docker Compose reads the same file.
 SERVICE=arm-hardware
 FOREGROUND=0
 ARGS_GIVEN=0
 RUN_ARGS=()
 
 usage() {
-  sed -n '3,18p' "$BASH_SOURCE" | sed -e 's/^# \{0,1\}//'
+  cat <<'EOF'
+Container helper:
+  -H | --hardware   real hardware service (default)
+  -s | --sim        simulation service
+  -f | --foreground stay in the container shell
+  --                pass remaining args to run_arm.sh
+EOF
 }
 
 while [ $# -gt 0 ]; do
@@ -54,10 +35,6 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# Defaults when no explicit run_arm.sh arguments were given. The hardware
-# service uses run_arm.sh's own default (real hardware + 2-D reference, control
-# on); the plain `arm` service drops the motor driver (safe without the USB
-# adapter) but keeps the same 2-D reference view.
 if [ "$ARGS_GIVEN" = "0" ]; then
   if [ "$SERVICE" = "arm-hardware" ]; then
     RUN_ARGS=()
@@ -74,12 +51,6 @@ if [ "$SERVICE" = "arm-hardware" ]; then
   fi
 fi
 
-# ---------------------------------------------------------------------------
-# X11: forward the host display into the container. Mounts are only added when
-# the source exists, because podman-backed compose errors on a missing bind
-# source; headless runs still start (arm_sim_sfml then reports the missing
-# display and exits instead of hanging the launch).
-# ---------------------------------------------------------------------------
 X11_ARGS=()
 if [ -n "${DISPLAY:-}" ] && [ -d /tmp/.X11-unix ]; then
   X11_ARGS+=(-v /tmp/.X11-unix:/tmp/.X11-unix:rw)
@@ -87,8 +58,6 @@ if [ -n "${DISPLAY:-}" ] && [ -d /tmp/.X11-unix ]; then
   if [ -f "$xauth" ] && [ -r "$xauth" ]; then
     X11_ARGS+=(-v "$xauth:/tmp/.Xauthority:ro")
   else
-    # Access-control-disabled X servers (e.g. WSLg) need no cookie. Clear the
-    # compose default so Xlib does not look for a file that is not mounted.
     X11_ARGS+=(-e XAUTHORITY=)
   fi
 elif [ -n "${DISPLAY:-}" ]; then
@@ -108,8 +77,6 @@ else
   echo "[launch] run_arm.sh ${RUN_ARGS[*]}"
 fi
 
-# Inside the container: cd to the mounted repo, launch run_arm.sh, then keep
-# an interactive shell. Positional args: $1 = foreground flag, rest = run args.
 read -r -d '' INNER <<'INNER_EOF' || true
 set -u
 fg="$1"

@@ -1,12 +1,4 @@
-"""Execute the arm unit tests.
-
-Runs the GTest binary produced by the package (built from test/). The test
-binary is installed to <prefix>/lib/arm, so it is located from the
-package prefix and executed as a plain process (it is not a ROS node).
-
-Usage:
-    ros2 launch arm test.launch.py
-"""
+"""Run the arm GTest binary."""
 import os
 
 from ament_index_python.packages import get_package_prefix
@@ -18,7 +10,7 @@ from launch.actions import ExecuteProcess, LogInfo
 def generate_launch_description():
     prefix = get_package_prefix('arm')
 
-    # Standard ament install locations for the test executable.
+
     name = 'test_arm'
     candidates = [
         os.path.join(prefix, 'lib', 'arm', name),

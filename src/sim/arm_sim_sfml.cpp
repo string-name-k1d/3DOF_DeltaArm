@@ -26,10 +26,6 @@ ArmSimSFMLNode::ArmSimSFMLNode(const rclcpp::NodeOptions & options)
               "arm/pos feedback; real arm/MotorFeedback overrides the view");
 }
 
-// Read the shared geometry.* parameters (the same ones the controller reads) and
-// hand them to a DeltaArm::Arm used purely as a kinematics reference, so the
-// motor -> arm angle conversion this renderer draws is the controller's own
-// code rather than a second implementation that can drift out of sync.
 void ArmSimSFMLNode::configureKinematics()
 {
   const auto base_radius = declare_parameter<double>("geometry.base_radius", 100.0);
@@ -113,9 +109,7 @@ void ArmSimSFMLNode::send_target(double x, double y, double z)
   goal.target.linear.y = y;
   goal.target.linear.z = z;
 
-  // Watch the result: an unreachable target is aborted by the controller, and
-  // without this the keys could walk the target marker out of the envelope with
-  // the arm simply refusing to move and nothing on screen to say why.
+
   rclcpp_action::Client<SetPosition>::SendGoalOptions opts;
   opts.result_callback =
     [this](const rclcpp_action::ClientGoalHandle<SetPosition>::WrappedResult & result) {
@@ -124,7 +118,7 @@ void ArmSimSFMLNode::send_target(double x, double y, double z)
         last_rejection_.clear();
         return;
       }
-      // res is null for a cancelled/abandoned goal, so do not dereference it.
+
       if (!res) {
         last_rejection_ = "set_pos goal was not accepted";
       } else if (res->status == SetPosition::Result::STATUS_UNREACHABLE) {
@@ -177,9 +171,6 @@ bool ArmSimSFMLNode::feedback_live() const
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Anti-shake: sticky source selection + smoothed display angles
-// ---------------------------------------------------------------------------
 bool ArmSimSFMLNode::select_source()
 {
   const bool good = feedback_live();
@@ -189,13 +180,13 @@ bool ArmSimSFMLNode::select_source()
     fb_lost_ = now();
     fb_ever_good_ = true;
     if (!fb_active_ && fb_streak_ >= kFbAcquireStreak) {
-      fb_active_ = true;  // acquire: require a consistent run, not one msg
+      fb_active_ = true;
     }
   } else {
     fb_streak_ = 0;
     if (fb_active_ && fb_ever_good_ &&
         (now() - fb_lost_).seconds() > kFbHoldSeconds) {
-      fb_active_ = false;  // only drop after the hold period (no flicker)
+      fb_active_ = false;
     }
   }
   return fb_active_;
@@ -209,12 +200,11 @@ void ArmSimSFMLNode::update_display(const float raw[3], float dt_seconds)
     return;
   }
 
-  // dt-based exponential smoothing (frame-rate independent). Jitter of ~1 deg
-  // at 10-20 Hz message rates is attenuated ~10x; real motion still tracks.
+
   const double alpha = 1.0 - std::exp(-static_cast<double>(dt_seconds) / kDispTauSeconds);
   for (int i = 0; i < 3; ++i) {
     if (std::fabs(raw[i] - display_ang_[i]) > kDispSnapDeg) {
-      display_ang_[i] = raw[i];  // big jump (mode switch / retarget): snap
+      display_ang_[i] = raw[i];
     } else {
       display_ang_[i] = static_cast<float>(
         display_ang_[i] + alpha * (raw[i] - display_ang_[i]));
@@ -222,4 +212,4 @@ void ArmSimSFMLNode::update_display(const float raw[3], float dt_seconds)
   }
 }
 
-}  // namespace DeltaArmSim
+}

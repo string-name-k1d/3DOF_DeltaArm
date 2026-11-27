@@ -1,15 +1,4 @@
-"""Real or fake hardware bringup.
-
-Usage:
-  ros2 launch arm hardware.launch.py
-  ros2 launch arm hardware.launch.py control:=false
-  ros2 launch arm hardware.launch.py driver:=false
-  ros2 launch arm hardware.launch.py manual:=true
-
-driver:=true drives the real servos. control defaults to true; pass
-control:=false to read the servos without commanding them.
-driver:=false runs the controller without any driver (fake hardware).
-"""
+"""Real or fake hardware bringup."""
 
 import os
 

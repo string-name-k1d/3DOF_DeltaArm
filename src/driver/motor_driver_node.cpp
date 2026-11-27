@@ -14,20 +14,17 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
       feedback_frame_("base_link"), online_{0, 0, 0}, error_{0, 0, 0} {
     declareParams();
 
-    // HW Configs
+
     const std::string port = get_parameter("port_name").as_string();
     const int baudrate = get_parameter("baudrate").as_int();
     const auto servo_ids = get_parameter("servo_ids").as_integer_array();
-    // ROS Configs
+
     const bool auto_init = get_parameter("auto_init").as_bool();
     enable_motion_ = get_parameter("enable_motion").as_bool();
     targets_topic_ = get_parameter("targets_topic").as_string();
     offline_streak_ = get_parameter("offline_streak").as_int();
-    // Motor Configs
-    // The servo's travel limits live in the SHARED `geometry` block so the
-    // controller's IK can bound itself to the same envelope. This node's own
-    // angle_min/angle_max still override it when set; left empty (the default)
-    // they inherit the geometry values, so the limit is stated once.
+
+
     const auto geom_min = get_parameter("geometry.angle_min").as_double_array();
     const auto geom_max = get_parameter("geometry.angle_max").as_double_array();
     const auto own_min = get_parameter("angle_min").as_double_array();
@@ -37,9 +34,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
     const auto start_angles = get_parameter("start_angles").as_double_array();
     const double max_speed = get_parameter("max_speed").as_double();
 
-    // Resolve the travel actually enforced, then publish it back onto the
-    // parameters so `ros2 param get` shows the effective limit rather than an
-    // empty inherited default, and say where it came from.
+
     const auto resolved_min = angle_min.empty() ? std::vector<double>{0.0, 0.0, 0.0} : angle_min;
     const auto resolved_max = angle_max.empty() ? std::vector<double>{145.0, 145.0, 145.0} : angle_max;
     set_parameter(rclcpp::Parameter("angle_min", resolved_min));
@@ -60,9 +55,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
     }
     config.max_speed = static_cast<float>(max_speed);
 
-    // Pre-flight the serial device. The FashionStar SDK calls exit(-1) if the
-    // port cannot be opened (FashionStar_UartServoProtocol.cpp), so avoid
-    // constructing it when the device is missing - degrade to offline feedback.
+
     const bool port_ok = (access(port.c_str(), F_OK | R_OK | W_OK) == 0);
     if (!port_ok) {
         RCLCPP_WARN(get_logger(),
@@ -115,7 +108,7 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
                     targets_topic_.c_str());
     }
 
-    // ROS Start up
+
     feedback_pub_ = create_publisher<arm::msg::MotorFeedback>("arm/MotorFeedback", 10);
 
     const auto period =
@@ -129,42 +122,36 @@ MotorDriverNode::MotorDriverNode(const rclcpp::NodeOptions& options)
 }
 
 void MotorDriverNode::declareParams() {
-    // Serial port of the FashionStar bus-servo adapter. The per-machine value
-    // comes from SERIAL_DEVICE in .env; the parameter/argument still wins when
-    // explicitly set, and the value falls back to /dev/ttyUSB0 when unset.
+
+
     const char* env_port = std::getenv("SERIAL_DEVICE");
     const std::string default_port =
         (env_port != nullptr && env_port[0] != '\0') ? env_port : "/dev/ttyUSB0";
     declare_parameter<std::string>("port_name", default_port);
     declare_parameter<int>("baudrate", 115200);
     declare_parameter<std::vector<int64_t>>("servo_ids", {0, 1, 2});
-    // Installation offset (deg) per motor: the physical servo angle when the
-    // joint is at the arm's zero/home pose. Used to map joint-space commands
-    // to physical servo angles and read-backs back to joint space.
+
+
     declare_parameter<std::vector<double>>("start_angles", {0.0, 0.0, 0.0});
-    // Physical position limits (deg): 0 = fully extended, 145 = most retracted.
-    // Leave EMPTY to inherit the shared geometry.angle_min / geometry.angle_max,
-    // which is where the controller reads them from - keeping the limit in one
-    // place means the IK and the servo can never disagree about the envelope.
+
+
     declare_parameter<std::vector<double>>("angle_min", std::vector<double>{});
     declare_parameter<std::vector<double>>("angle_max", std::vector<double>{});
-    // Servo travel limits, shared with the controller. Set these, not the pair
-    // above, unless this node genuinely needs different hardware.
+
+
     declare_parameter<std::vector<double>>("geometry.angle_min", {0.0, 0.0, 0.0});
     declare_parameter<std::vector<double>>("geometry.angle_max", {145.0, 145.0, 145.0});
-    // Velocity limit (deg/s) used for the on-servo trajectory profiling.
+
     declare_parameter<double>("max_speed", 100.0);
     declare_parameter<bool>("auto_init", true);
     declare_parameter<bool>("enable_motion", true);
     declare_parameter<double>("feedback_rate", 10.0);
     declare_parameter<std::string>("feedback_frame", "base_link");
 
-    // Input target topic. The controller publishes its IK result on
-    // "arm/motor_targets"; the driver consumes that stream directly. The
-    // parameter is kept for external controllers that publish elsewhere.
+
     declare_parameter<std::string>("targets_topic", "arm/motor_targets");
-    // Consecutive failed pings/queries before a servo is declared offline
-    // (feedback debounce, see publishFeedback()).
+
+
     declare_parameter<int>("offline_streak", 3);
 }
 
@@ -194,7 +181,7 @@ void MotorDriverNode::publishFeedback() {
     if (!driver_) {
         for (int i = 0; i < 3; ++i) {
             online_[i] = 0;
-            error_[i] = 2; // offline (no serial device)
+            error_[i] = 2;
             msg->servo_online[i] = online_[i];
             msg->servo_error[i] = error_[i];
             msg->servo_angle_current[i] = -1.0f;
@@ -205,11 +192,8 @@ void MotorDriverNode::publishFeedback() {
 
     std::lock_guard<std::mutex> lock(bus_mutex_);
     for (int i = 0; i < 3; ++i) {
-        // ── ping (debounced) ────────────────────────────────────────────────
-        // A single dropped ping must NOT flip the servo offline: consumers that
-        // switch between measured feedback and a model estimate (the 2-D
-        // visualiser) would then visibly shake. Only `offline_streak_`
-        // CONSECUTIVE failures declare the servo offline.
+
+
         bool ping_ok = false;
         try {
             bool reported_online = false;
@@ -231,7 +215,7 @@ void MotorDriverNode::publishFeedback() {
             online_[i] = 0;
         }
 
-        // ── angle read-back (debounced, holds the last good value) ──────────
+
         float angle = -1.0f;
         if (online_[i] == 1) {
             double queried = -1.0;
@@ -244,9 +228,9 @@ void MotorDriverNode::publishFeedback() {
             if (queried != -1.0) {
                 query_fail_streak_[i] = 0;
                 angle = static_cast<float>(queried);
-                last_good_angle_[i] = angle; // cache for transient failures
+                last_good_angle_[i] = angle;
             } else if (++query_fail_streak_[i] < offline_streak_ && last_good_angle_[i] >= 0.0f) {
-                angle = last_good_angle_[i]; // hold last good - no -1 blip
+                angle = last_good_angle_[i];
             } else {
                 angle = -1.0f;
                 if (error_[i] == 0)
@@ -262,4 +246,4 @@ void MotorDriverNode::publishFeedback() {
     feedback_pub_->publish(*msg);
 }
 
-} // namespace DeltaArmDriverNode
+}

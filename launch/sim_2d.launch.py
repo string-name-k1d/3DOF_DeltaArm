@@ -1,14 +1,4 @@
-"""2-D SFML delta-arm simulation.
-
-Usage:
-  ros2 launch arm sim_2d.launch.py
-  ros2 launch arm sim_2d.launch.py control:=false
-  ros2 launch arm sim_2d.launch.py driver:=true
-  ros2 launch arm sim_2d.launch.py driver:=true control:=false
-
-driver:=true visualises the real servos as a model reference. control defaults
-to true; pass control:=false to observe the real arm without commanding it.
-"""
+"""2-D SFML visualiser / simulation."""
 
 import os
 

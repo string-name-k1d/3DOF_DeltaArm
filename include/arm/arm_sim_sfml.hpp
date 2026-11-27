@@ -15,32 +15,7 @@
 namespace DeltaArmSim
 {
 
-/**
- * @brief 2-D graphical (SFML) delta-arm simulator.
- *
- * Presents a live, self-contained view of the arm and forwards user targets to
- * the arm controller *exactly* like the manual-control node does:
- *
- *  * action-client to "arm/set_pos"  : forwards commanded targets;
- *  * subscribes "arm/pos"             : current position + motor angles.
- *
- * While a fresh, all-online "arm/MotorFeedback" message is arriving, the
- * renderer instead draws the REAL machine: the three measured servo angles
- * (degrees, joint frame) drive the FK geometry, so the picture mirrors the
- * physical arm driven by the motor driver.
- *
- * The SFML renderer shows two simultaneous projections of the arm from the
- * live motor angles:
- *
- *  * top view   - the arm as seen looking down the base's vertical axis: the
- *                 three limbs project onto the XY plane;
- *  * side view  - the arm as seen looking along the Y axis: the XZ projection
- *                 of two representative limbs (upper arm + lower
- *                 parallelogram rod + end-effector platform), which shows the
- *                 full "side" of a delta arm.
- *
- * Both projections share a common pixel scale so movement looks consistent.
- */
+/// Optional 2-D SFML visualiser for arm/pos and live motor feedback.
 class ArmSimSFMLNode : public rclcpp::Node
 {
 public:
@@ -49,138 +24,98 @@ public:
 
   explicit ArmSimSFMLNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
-  /// @brief Send a target; replaces any in-flight goal (mirrors the manual node).
+
   void send_target(double x, double y, double z);
 
-  // ── Kinematics (shared with the controller) ──────────────────────────────
-  //
-  // The motor -> arm angle conversion used for drawing is the SAME code the
-  // controller runs, not a second implementation. A private copy of the 4-bar
-  // solve silently disagreed with the controller's reachable band, which showed
-  // up as a limb whose arm angle froze at 90 deg while the motor angle tracked
-  // the target perfectly.
-  /// @brief Commanded motor angle (deg) -> upper-arm angle (deg) for a limb,
-  ///        clamped to that limb's reachable band. Never throws.
+
   float arm_angle_deg(float motor_deg, int leg) const
   {
     return kin_.arm_angle_from_motor_deg(motor_deg, leg);
   }
 
-  /// @brief Reachable arm-angle band of a limb in degrees; false when empty.
+
   bool arm_band(int leg, float & lo_deg, float & hi_deg) const
   {
     return kin_.get_linkage_band(leg, lo_deg, hi_deg);
   }
 
-  /// @brief Measured motor angle -> arm angle, reporting linkage closure
-  ///        failure instead of clamping. `arm_out` is only written on success;
-  ///        on failure the renderer keeps its last valid arm angle for the
-  ///        limb and flags the reading as out of closure.
+
   bool try_arm_angle_deg(float motor_deg, int leg, float & arm_out) const
   {
     return kin_.try_arm_from_motor_deg(motor_deg, leg, arm_out);
   }
 
-  /// @brief Motor angles (deg) bounding the linkage's closure range, resolved
-  ///        once per geometry. Used to tell which side a reading fell off.
+
   bool arm_motor_span(int leg, float & motor_lo_deg, float & motor_hi_deg) const
   {
     return kin_.linkage_motor_span(leg, motor_lo_deg, motor_hi_deg);
   }
 
-  /// @brief Resolve the task-space pose through the shared IK so the renderer
-  ///        can be seeded with a valid posture before the first arm/pos message.
-  ///        Returns false (with `reason` set) when the pose is unreachable.
+
   bool seed_pose(double x, double y, double z, float motor_out[3], std::string & reason);
 
-  /// @brief Populated when the controller rejects a set_pos goal, so the view
-  ///        can explain a target that was accepted by the keys but not by the
-  ///        arm. Cleared on the next accepted goal.
+
   const std::string & last_rejection() const { return last_rejection_; }
   bool goal_rejected() const { return !last_rejection_.empty(); }
 
-  /// Latest end-effector position (m) from the controller stream.
+
   double pos_x_ = 0.0;
   double pos_y_ = 0.0;
   double pos_z_ = 0.0;
 
-  /// Latest commanded target position (m) from the controller stream
-  /// (arm/pos.target_position) - drawn as the "control target" marker.
+
   double tar_x_ = 0.0;
   double tar_y_ = 0.0;
   double tar_z_ = 0.0;
 
-  /// Latest motor angles (degrees) from the controller stream.
+
   float ang_[3] = {0.0f, 0.0f, 0.0f};
 
-  /// Latest motor TARGET angles (degrees) from the controller stream
-  /// (arm/pos.motor_angles_target) - shown alongside the current ones.
+
   float ang_tar_[3] = {0.0f, 0.0f, 0.0f};
 
-  /// Whether streamed position feedback has arrived at least once.
+
   bool got_pos_ = false;
 
-  /// Latest measured motor angles (degrees, joint frame) from the real driver.
+
   float fb_ang_[3] = {-1.0f, -1.0f, -1.0f};
-  /// Servo online / error flags from the real driver.
+
   int fb_online_[3] = {0, 0, 0};
   int fb_error_[3] = {0, 0, 0};
 
-  /// True when a fresh, all-online "arm/MotorFeedback" message arrived
-  /// recently; the renderer then draws the REAL machine instead of the sim
-  /// stream (arm/pos).
+
   bool feedback_live() const;
 
-  // ── Anti-shake: source hysteresis + last-good latch + smoothing ─────────
-  //
-  // The drawn motor angles previously flipped every frame between the real
-  // servo readback (arm/MotorFeedback) and the controller estimate (arm/pos)
-  // whenever a single serial ping/query failed - the two disagree by the
-  // servo install offsets, so the drawing visibly "shook" without any motion.
-  // The selection is now sticky:
-  //
-  //  * acquiring real feedback requires kFbAcquireStreak consecutive good
-  //    messages;
-  //  * once acquired it is HELD for kFbHoldSeconds after the feedback drops
-  //    out (drawing the last measured angles, not the estimate);
-  //  * only after the hold expires does the view fall back to arm/pos.
-  //
-  // On top of the source selection the drawn angles are exponentially
-  // smoothed (update_display) so servo encoder jitter does not vibrate the
-  // picture; large jumps (> kDispSnapDeg) snap instead of lagging.
-  static constexpr int    kFbAcquireStreak = 3;     // good msgs before switch
-  static constexpr double kFbHoldSeconds   = 1.5;   // keep fb this long after loss
-  static constexpr float  kDispSnapDeg     = 25.0f; // snap instead of glide past
-  static constexpr double kDispTauSeconds  = 0.15;  // smoothing time constant
 
-  /// Per-frame source selection with hysteresis. Returns true when the
-  /// renderer should draw the REAL servo feedback, false for the sim stream.
-  /// Call once per rendered frame BEFORE update_display().
+  static constexpr int    kFbAcquireStreak = 3;
+  static constexpr double kFbHoldSeconds   = 1.5;
+  static constexpr float  kDispSnapDeg     = 25.0f;
+  static constexpr double kDispTauSeconds  = 0.15;
+
+
   bool select_source();
 
-  /// Feed the currently-selected raw motor angles + frame time (seconds).
-  /// Smooths into display_ang_ (used by the renderer) with a dt-based EMA.
+
   void update_display(const float raw[3], float dt_seconds);
 
-  /// Smoothed motor angles to draw (degrees).
+
   const float * display_angles() const { return display_ang_; }
 
-  /// Which source the current display angles come from (post-hysteresis).
+
   bool feedback_source_active() const { return fb_active_; }
 
 private:
   void onPosition(const arm::msg::ArmPosition::SharedPtr msg);
   void onFeedback(const arm::msg::MotorFeedback::SharedPtr msg);
-  /// @brief Read the shared geometry.* parameters and configure the kinematics
-  ///        reference (same parameters the controller reads).
+
+
   void configureKinematics();
 
   rclcpp_action::Client<SetPosition>::SharedPtr action_client_;
   rclcpp::Subscription<arm::msg::ArmPosition>::SharedPtr pos_sub_;
   rclcpp::Subscription<arm::msg::MotorFeedback>::SharedPtr fb_sub_;
 
-  /// Kinematics reference used only to convert motor -> arm angles for drawing
-  /// and to seed the initial posture. Holds no motion state of its own.
+
   DeltaArm::Arm kin_;
 
   std::string last_rejection_;
@@ -188,15 +123,15 @@ private:
   rclcpp::Time fb_last_;
   bool got_fb_ = false;
 
-  // Anti-shake state (see comment above).
-  bool fb_active_ = false;      // sticky source selection
-  int  fb_streak_ = 0;          // consecutive good feedback messages
-  bool fb_ever_good_ = false;   // feedback seen valid at least once
-  rclcpp::Time fb_lost_;        // when feedback stopped being good
+
+  bool fb_active_ = false;
+  int  fb_streak_ = 0;
+  bool fb_ever_good_ = false;
+  rclcpp::Time fb_lost_;
   float display_ang_[3] = {0.0f, 0.0f, 0.0f};
   bool display_init_ = false;
 };
 
-}  // namespace DeltaArmSim
+}
 
-#endif  // arm__ARM_SIM_SFML_HPP_
+#endif

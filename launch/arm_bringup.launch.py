@@ -1,15 +1,4 @@
-"""Reusable controller / driver / manual bringup.
-
-Included by the user-facing launch files; not normally launched directly.
-
-Arguments:
-  params_file         arm parameter YAML (default config/arm_params.yaml)
-  driver              start the real motor driver (default false)
-  control             enable motion/action server (default true); this is a
-                      runtime switch, never a config/*.yaml parameter
-  manual              start the keyboard target-position node (default false)
-  publish_joints      publish the optional arm/joints debug topic (default false)
-"""
+"""Shared arm controller / driver / manual bringup."""
 
 import os
 
@@ -39,10 +28,8 @@ def generate_launch_description():
         'enable_motion': enable_motion,
         'publish_joints': publish_joints_flag,
     }]
-    # Serial port is a per-machine setting from .env (SERIAL_DEVICE). Apply it
-    # AFTER the YAML so a stale/hardcoded port_name in an installed params file
-    # cannot override it. The driver node also reads SERIAL_DEVICE as a
-    # fallback when no launch override is present.
+
+
     serial_device = os.environ.get('SERIAL_DEVICE', '')
     driver_params = [params_file, {
         'enable_motion': enable_motion,

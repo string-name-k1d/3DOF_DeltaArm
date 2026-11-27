@@ -48,11 +48,8 @@ ManualControlNode::ManualControlNode(const rclcpp::NodeOptions & options)
 
 void ManualControlNode::shift_target(const std::array<double, 3> & delta)
 {
-  // A rejected goal must not become the origin of the next step: otherwise
-  // repeated keypresses keep walking the target deeper into the invalid area
-  // and the arm stays still until enough reverse steps bring it back. Start
-  // every step from where the arm actually is. Before the first feedback
-  // arrives, fall back to the last commanded target so keys are not lost.
+
+
   std::array<double, 3> base{{pos_x_.load(), pos_y_.load(), pos_z_.load()}};
   if (!position_received_.load() && target_initialized_) {
     base = {{target_x_, target_y_, target_z_}};
@@ -89,9 +86,7 @@ void ManualControlNode::send_target(double x, double y, double z)
   goal.target.linear.y = y;
   goal.target.linear.z = z;
 
-  // Fire-and-forget: the controller accepts & executes immediately, and a newer
-  // goal simply updates the target. The result callback only logs/steers the
-  // operator - it never changes target_*, which is owned by the key thread.
+
   auto options = rclcpp_action::Client<SetPosition>::SendGoalOptions();
   options.result_callback = std::bind(&ManualControlNode::onGoalResult, this, std::placeholders::_1);
   action_client_->async_send_goal(goal, options);
@@ -138,4 +133,4 @@ void ManualControlNode::onPosition(const arm::msg::ArmPosition::SharedPtr msg)
   }
 }
 
-}  // namespace DeltaArmRos
+}

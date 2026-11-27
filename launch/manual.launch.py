@@ -1,9 +1,4 @@
-"""Manual target-position control (WASD + Z/X).
-
-Attaches to an already-running arm_controller (sim_2d, sim_3d or hardware).
-To start the controller and manual node together, pass manual:=true to those
-launches instead.
-"""
+"""Attach keyboard target control to a running arm stack."""
 
 import os
 

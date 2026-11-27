@@ -1,172 +1,49 @@
-# ============================================================================
-# Gen-0 delta-arm configuration (alternate geometry set).
-#
-# Same structure as arm_params.yaml; only the mechanism geometry differs. Select
-# it at launch time instead of the default set, e.g.:
-#   ros2 launch arm sim_2d.launch.py params_file:=$(ros2 pkg prefix arm)/share/arm/config/arm_gen0_params.yaml
-# or, through the container entrypoint:
-#   ARM_PARAMS_FILE=/root/ws/config/arm_gen0_params.yaml ./run_arm.sh 2d
-# ============================================================================
 
 arm_controller:
   ros__parameters:
-    # feedback_rate: continuous arm/pos publish rate (Hz).
     feedback_rate: 20.0
-    # feedback_frame: coordinate frame attached to the published messages.
     feedback_frame: "base_link"
-    # reach_tolerance: maximum end-effector distance (m) from the goal that
-    #   counts as reached; smaller returns STATUS_POS_NOT_REACHED.
     reach_tolerance: 0.005
-    # reach_timeout: seconds to wait for the measured pose to enter the
-    #   tolerance before the action returns STATUS_POS_NOT_REACHED.
     reach_timeout: 10.0
 
-# ============================================================================
-# Shared delta-arm mechanism geometry (read by BOTH the controller kinematics
-# and the 2-D SFML visualiser rendering). The "/**" glob makes the block below
-# visible to every node started from this file.
-# ============================================================================
 /**:
   ros__parameters:
     geometry:
-      # base_radius: circumradius (mm) of the equilateral triangle through the
-      #   three base-plate vertices. The arm shoulders (J joints) sit ON this
-      #   circle in this machine (classic delta), so it is the shoulder-pivot
-      #   radius used by the IK/FK.
       base_radius: 100.0
-      # platform_radius: circumradius (mm) of the equilateral triangle through
-      #   the three lower-rod end joints on the effector platform (P joints).
       platform_radius: 32.5
-      # upper_arm_len: arm actuation joint -> elbow rod length (mm) (rf).
       upper_arm_len: 120.0
-      # lower_arm_len: elbow -> platform joint rod length (mm) (re).
       lower_arm_len: 250.0
 
-      # servo_radius: circumradius (mm) of the three servo output shafts (S
-      #   joints). The servos mount UNDER the base plate (so servo_z < 0 puts
-      #   the whole linkage below it), closer to the platform centre than the
-      #   arm shoulders at base_radius.
       servo_radius: 60.0
-      # servo_z: height (mm) of the servo output shafts below the pivot plane.
       servo_z: -25.0
-      # upper_rod_len: length (mm) of the SERVO HORN (the short motor crank
-      #   fixed to the servo shaft; 4-bar link `a`).
       upper_rod_len: 35.0
-      # servo_rod_len: length (mm) of the RIGID connecting rod between the
-      #   crank pin and the arm attach bracket (4-bar link `b`). The stage-2 IK
-      #   solves the 4-bar closed form so the motor angle is a NON-linear map
-      #   of the arm angle:
-      #     theta_b = 180 - arm_angle
-      #     A = 2 a d cos(theta_b) - 2 b d
-      #     B = 2 a d sin(theta_b)
-      #     C = c^2 - a^2 - b^2 - d^2 + 2 a b cos(theta_b)
-      #     motor = 2*pi - atan2(B,A) - acos(C/|(A,B)|)   (+ home offset, deg)
-      #   with c = the shoulder->socket link and d = the servo->shoulder ground
-      #   link (both derived below). The linkage closes only for arm angles
-      #   above ~33 deg (flat poses are physically unreachable through it).
       servo_rod_len: 60.0
-      # arm_attach_dist: fixed distance (mm) from the arm's base joint to the
-      #   lower-rod attach bracket, measured ALONG the arm. Together with
-      #   arm_attach_offset it defines the shoulder->socket link c =
-      #   hypot(arm_attach_dist, arm_attach_offset).
       arm_attach_dist: 52.0
-      # arm_attach_offset: PERPENDICULAR standoff (mm) of the rod's arm-side
-      #   ball socket from the arm axis (the real bracket gap between the rod
-      #   endpoint and the arm).
       arm_attach_offset: 20.5
-      # rod_spread: lateral separation (mm) of the two parallel bars of each
-      #   lower arm (elbow -> platform), visual only.
       rod_spread: 8.0
 
-      # bypass_reachability: TEMPORARY diagnostic switch.
-      #   false (default, and what you want normally) = the IK REFUSES any
-      #     target outside the reachable envelope, reporting which leg failed
-      #     ("circle miss" or "outside the reachable band").
-      #   true = those refusals are suppressed and the target is resolved to the
-      #     NEAREST arm angle at which the 4-bar linkage physically closes,
-      #     ignoring the servo-travel / monotonicity / arm-window terms. Lets a
-      #     run proceed through poses the model thinks are out of range so the
-      #     mismatch can be compared against the real mechanism.
-      #   It still throws if the linkage closes nowhere in the arm window - no
-      #   pose exists to command. Set back to false to restore the guard.
       bypass_reachability: true
 
-      # raw_motor_clamp: TEMPORARY while the workspace model is being corrected.
-      #   true (default) = ignore the derived reachable band entirely and clamp
-      #     the solved motor command ONLY to the raw servo travel
-      #     [angle_min, angle_max] (also used by the forward estimate). This
-      #     supersedes the band-intersection clamp used by bypass_reachability.
-      #   false = restore the band-based reachability guard.
       raw_motor_clamp: true
 
-      # motor_positions / platform_offsets: optional explicit joint positions
-      #   in the world frame (mm), flattened as [x0,y0,z0, x1,y1,z1, x2,y2,z2].
-      #   When absent they are derived from base_radius / platform_radius: an
-      #   equilateral set spaced 120 deg apart, matching the delta-arm FK. The
-      #   effector triangle is INVERTED (apex-down): each platform joint sits on
-      #   the SAME radial as its motor (the orientation the IK/FK solve for).
-      #   To override, uncomment and edit, e.g.:
-      #   motor_positions: [0.0, -100.0, 0.0,  86.6, 50.0, 0.0,  -86.6, 50.0, 0.0]
-      #   platform_offsets: [0.0, -32.5, 0.0,  28.15, 16.25, 0.0,  -28.15, 16.25, 0.0]
-
-    # Initial-pose / simulation behaviour (shared by controller + visualiser).
     sim:
-      # initial_pos: the arm's start posture (metres). Must be IK-reachable
-      #   (the controller commands it on startup, so the arm never begins at
-      #   the degenerate (0,0,0)) AND - with the 4-bar linkage - each limb must
-      #   be able to close, i.e. the pose must sit inside the working envelope
-      #   (arm angles above ~33 deg, all limbs). The visualiser seeds its drawn
-      #   pose from the IK of this point too.
       initial_pos: [0.0, 0.0, -0.33]
-      # simulate_arrival: in sim mode the controller promotes each set_pos goal
-      #   to the current pose immediately (no motor driver in the loop).
       simulate_arrival: true
 
 arm_motor_driver:
   ros__parameters:
-    # port_name: NOT set here. The FashionStar bus-servo adapter port comes
-    #   from SERIAL_DEVICE in .env (default /dev/ttyUSB0); edit it there.
-    # baudrate: UART baud rate of the bus-servo adapter.
     baudrate: 115200
-    # servo_ids: binary ids of the three delta-arm actuators, one per limb.
     servo_ids: [0, 1, 2]
-    # start_angles: installation offset (deg) per motor — the physical servo
-    #   angle when the joint sits at the arm's zero/home pose. A commanded
-    #   joint angle is sent as joint + start_angles.
     start_angles: [0.0, 0.0, 0.0]
-    # angle_min: lower physical position limit (deg) per motor. Control outputs
-    #   are clamped into [angle_min, angle_max] before reaching the servo.
     angle_min: [0.0, 0.0, 0.0]
-    # angle_max: upper physical position limit (deg) per motor. 0 = limb fully
-    #   extended (away from the centre), 145 = most retracted.
     angle_max: [145.0, 145.0, 145.0]
-    # max_speed: velocity limit (deg/s) used by the servo's trajectory
-    #   profiling when it interpolates current -> commanded angle.
     max_speed: 100.0
-    # auto_init: whether the driver should ping + sync the servos at startup.
     auto_init: true
-    # targets_topic: topic carrying the motor-angle commands this driver
-    #   consumes. The controller publishes its IK output on
-    #   arm/motor_targets — keep this at the default.
     targets_topic: "arm/motor_targets"
-    # offline_streak: consecutive failed pings/angle-queries before a servo is
-    #   declared offline. Debounces serial-bus hiccups so feedback consumers
-    #   (the 2-D visualiser) do not shake between measured values and the model
-    #   estimate on a single dropped packet.
     offline_streak: 3
 
 arm_manual_control:
   ros__parameters:
-    # step: manual-control step size (m) applied per key press on the driven
-    #   axis.
     step: 0.01
-    # axis0: component of the target position the first key pair drives ("z").
     axis0: "z"
-    # axis1: component of the target position the second key pair drives ("y").
     axis1: "y"
-    # Every key press starts from the last measured pose from arm/pos, so a
-    # rejected target is never used as the origin of the next step.
-    # Optional hard task-space clamp (metres [x,y,z]); enable by uncommenting
-    # both lines.
-    # pos_min: [-0.30, -0.30, -0.50]
-    # pos_max: [0.30, 0.30, 0.0]

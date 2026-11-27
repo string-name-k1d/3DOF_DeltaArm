@@ -1,25 +1,4 @@
-"""Gazebo Harmonic (gz-sim 8) 3-D simulation of the 3-DoF delta arm.
-
-Usage:
-  ros2 launch arm_gazebo sim_3d.launch.py
-  ros2 launch arm_gazebo sim_3d.launch.py control:=false
-  ros2 launch arm_gazebo sim_3d.launch.py gui:=true
-  ros2 launch arm_gazebo sim_3d.launch.py manual:=true
-  ros2 launch arm_gazebo sim_3d.launch.py payload:=endpoint
-  ros2 launch arm_gazebo sim_3d.launch.py \
-      use_existing_gz:=true world_name:=apriltag1 mount:=true
-  ros2 launch arm_gazebo sim_3d.launch.py \
-      use_existing_gz:=true world_name:=apriltag1 mount:=true \
-      bridge_clock:=false
-
-The arm controller and manual node are included from the arm package's
-arm_bringup.launch.py so the 2-D, 3-D and hardware launches share one node
-definition. The endpoint payload is a passive stand-in without joints, so it
-runs without a controller.
-
-ARM_PAYLOAD, ARM_MOUNT and ARM_PARAMS_FILE provide defaults for payload, mount
-and params_file when the launch arguments are not given.
-"""
+"""Gazebo 3-D arm simulation."""
 
 import os
 

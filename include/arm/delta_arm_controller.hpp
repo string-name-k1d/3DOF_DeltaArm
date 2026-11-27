@@ -21,17 +21,7 @@
 namespace DeltaArmRos
 {
 
-/**
- * @brief Task-space interface to the 3-DOF delta arm.
- *
- *  * set_pos : "arm/set_pos" action. Goal is a Twist (linear.x/y/z).
- *              Runs two-stage IK -> publishes motor targets for the driver.
- *  * pos     : "arm/pos" topic. Current pose, commanded target and the
- *              current/target motor angles, published continuously.
- *  * joints  : optional "arm/joints" debug topic (sensor_msgs/JointState)
- *              with the three motor angles in degrees. Only published when
- *              the 2-D visualiser requests it (publish_joints=true).
- */
+/// Task-space controller: set_pos action -> IK -> motor targets and arm/pos.
 class DeltaArmControllerNode : public rclcpp::Node
 {
 public:
@@ -51,7 +41,7 @@ private:
   void publishTargets(const float * angles);
   void onMotorFeedback(const arm::msg::MotorFeedback::SharedPtr msg);
 
-  // rclcpp_action callbacks
+
   rclcpp_action::GoalResponse handleGoal(
     const rclcpp_action::GoalUUID & uuid,
     std::shared_ptr<const SetPosition::Goal> goal);
@@ -82,6 +72,6 @@ private:
   bool publish_joints_;
 };
 
-}  // namespace DeltaArmRos
+}
 
-#endif  // arm__DELTA_ARM_CONTROLLER_HPP_
+#endif

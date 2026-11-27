@@ -13,9 +13,6 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ---------------------------------------------------------------------------
-# ROS 2 + external dependencies
-# ---------------------------------------------------------------------------
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -25,31 +22,18 @@ find_package(action_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
-# Optional: SFML (2D visual simulator). Optional so the hardware/controller/
-# driver build succeeds headless even when the simulator is not installed.
-# (The Gazebo 3D simulator lives in the separate arm_gazebo package.)
-#
-# SFML is NOT a rosdep dependency: it only enables the optional arm_sim_sfml
-# executable. Install it manually (Ubuntu: sudo apt install libsfml-dev) to
-# get the 2-D view, or configure with -DARM_BUILD_SFML_SIM=OFF to skip it.
-option(ARM_BUILD_SFML_SIM
-  "Build arm_sim_sfml, the optional 2-D SFML visualiser" ON)
-
+option(ARM_BUILD_SFML_SIM "Build the optional 2-D SFML visualiser" ON)
 if(ARM_BUILD_SFML_SIM)
   find_package(SFML 2.5 COMPONENTS graphics window system QUIET)
   if(SFML_FOUND)
-    message(STATUS "arm: SFML found - building the 2-D visualiser (arm_sim_sfml)")
+    message(STATUS "arm: building arm_sim_sfml")
   else()
-    message(STATUS "arm: SFML not found - skipping the 2-D visualiser "
-      "(arm_sim_sfml); install libsfml-dev to enable it")
+    message(STATUS "arm: SFML not found - skipping arm_sim_sfml")
   endif()
 else()
-  message(STATUS "arm: ARM_BUILD_SFML_SIM=OFF - skipping the 2-D visualiser")
+  message(STATUS "arm: ARM_BUILD_SFML_SIM=OFF - skipping arm_sim_sfml")
 endif()
 
-# ---------------------------------------------------------------------------
-# Custom ROS interfaces defined and used inside this same package.
-# ---------------------------------------------------------------------------
 set(arm_msg_files
   "msg/ArmPosition.msg"
   "msg/MotorFeedback.msg"
@@ -65,34 +49,19 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   DEPENDENCIES std_msgs geometry_msgs action_msgs
 )
 
-# ---------------------------------------------------------------------------
-# FashionStart C++ serial-bus servo driver (git submodule). Builds the
-# "fsuartservo" and "cserialport" shared libraries from the checked-out
-# submodule sources (self-contained; see motor_driver/CMakeLists.txt).
-# ---------------------------------------------------------------------------
 if(NOT EXISTS
    "${CMAKE_CURRENT_SOURCE_DIR}/motor_driver/fashionstart-uart-servo/CMakeLists.txt")
   message(FATAL_ERROR
-    "The FashionStar SDK submodule is missing:\n"
-    "  motor_driver/fashionstart-uart-servo\n"
-    "Initialise it before building:\n"
-    "  git submodule update --init --recursive\n"
-    "(or, from a parent workspace: "
-    "git -C <path-to-arm> submodule update --init --recursive)")
+    "FashionStar SDK submodule missing: motor_driver/fashionstart-uart-servo\n"
+    "Run: git submodule update --init --recursive")
 endif()
 add_subdirectory(motor_driver)
 
-# Local FSUS + CSerialPort include dirs used by the motor-driver code.
 set(FSUS_INC
   ${CMAKE_CURRENT_SOURCE_DIR}/motor_driver/fashionstart-uart-servo/include
   ${CMAKE_CURRENT_SOURCE_DIR}/motor_driver/fashionstart-uart-servo/dependency/CSerialPort/include
 )
 
-# ---------------------------------------------------------------------------
-# Kinematics library (ROS-neutral). The implementation lives with the
-# controller sources; exported so the separate arm_gazebo package can re-use
-# DeltaArm::Arm without recompiling the IK source.
-# ---------------------------------------------------------------------------
 add_library(arm_kinematics SHARED src/controller/delta-arm_dynamics.cpp)
 target_include_directories(arm_kinematics PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -106,9 +75,6 @@ install(TARGETS arm_kinematics
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
 
-# ---------------------------------------------------------------------------
-# Motor-driver wrapper library (FSUS binding, ROS-neutral)
-# ---------------------------------------------------------------------------
 add_library(arm_lib SHARED src/driver/motor_driver.cpp)
 target_include_directories(arm_lib PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -116,11 +82,6 @@ target_include_directories(arm_lib PUBLIC
 )
 target_link_libraries(arm_lib fsuartservo)
 
-# ---------------------------------------------------------------------------
-# Executables
-# ---------------------------------------------------------------------------
-# Helper: link a ROS target to the interfaces generated in this package plus
-# the standard ROS deps. On Humble we use rosidl_get_typesupport_target.
 function(arm_link_ros TARGET)
   ament_target_dependencies(${TARGET}
     rclcpp rclcpp_action std_msgs geometry_msgs action_msgs sensor_msgs
@@ -138,8 +99,6 @@ function(arm_ros_target TARGET)
   arm_link_ros(${TARGET})
 endfunction()
 
-# Task-space controller: set_pos action -> two-stage IK -> arm/motor_targets,
-# plus the continuous arm/pos topic (arm/joints is an optional 2-D debug stream).
 add_executable(arm_controller
   src/controller/delta_arm_controller_node.cpp
   src/controller/delta_arm_controller_main.cpp
@@ -147,8 +106,6 @@ add_executable(arm_controller
 arm_ros_target(arm_controller)
 target_link_libraries(arm_controller arm_kinematics)
 
-# Servo driver: arm/motor_targets -> FashionStar UART servos, publishing
-# arm/MotorFeedback.
 add_executable(arm_motor_driver
   src/driver/motor_driver_node.cpp
   src/driver/motor_driver_main.cpp
@@ -156,7 +113,6 @@ add_executable(arm_motor_driver
 arm_ros_target(arm_motor_driver)
 target_link_libraries(arm_motor_driver arm_lib)
 
-# Manual (WASD) control.
 add_executable(arm_manual
   src/manual/delta_arm_manual.cpp
   src/manual/delta_arm_manual_main.cpp
@@ -164,10 +120,6 @@ add_executable(arm_manual
 target_include_directories(arm_manual PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 arm_link_ros(arm_manual)
 
-# ---------------------------------------------------------------------------
-# Simulator (OPTIONAL - never blocks the hardware/controller/driver build)
-# ---------------------------------------------------------------------------
-# SFML 2D visual simulator - built only when SFML is available.
 if(ARM_BUILD_SFML_SIM AND SFML_FOUND
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/sim/arm_sim_sfml_main.cpp")
   add_executable(arm_sim_sfml
@@ -182,10 +134,6 @@ if(ARM_BUILD_SFML_SIM AND SFML_FOUND
     arm_kinematics
     sfml-graphics sfml-window sfml-system
   )
-
-  # Xlib preflight: SFML aborts the process when it cannot open the X display.
-  # Checking with XOpenDisplay first lets the node report a missing display or
-  # bad XAUTHORITY and exit cleanly instead (see arm_sim_sfml_main.cpp).
   find_package(X11 QUIET)
   if(X11_FOUND)
     target_link_libraries(arm_sim_sfml X11::X11)
@@ -193,9 +141,6 @@ if(ARM_BUILD_SFML_SIM AND SFML_FOUND
   endif()
 endif()
 
-# ---------------------------------------------------------------------------
-# Install
-# ---------------------------------------------------------------------------
 install(TARGETS
   arm_lib
   cserialport
@@ -219,28 +164,19 @@ install(DIRECTORY launch
 install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
 )
-
 install(DIRECTORY include/
   DESTINATION include
 )
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
-
-  ament_add_gtest(test_arm
-    test/test_delta_arm.cpp
-  )
+  ament_add_gtest(test_arm test/test_delta_arm.cpp)
   target_include_directories(test_arm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_link_libraries(test_arm arm_kinematics)
-
   install(TARGETS test_arm
     RUNTIME DESTINATION lib/${PROJECT_NAME}
   )
 endif()
 
 ament_export_dependencies(rosidl_default_runtime)
-
 ament_package()

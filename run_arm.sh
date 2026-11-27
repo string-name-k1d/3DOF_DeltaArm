@@ -1,45 +1,11 @@
 #!/bin/bash
-# Entry point for the 3-DoF delta arm. Works in a local ROS 2 install and in
-# the Docker container.
-#
-#   (no arguments)      real hardware + 2-D reference view, control ON
-#   hardware            real hardware: controller + motor driver, control ON
-#   fake / simulation   fake hardware: controller only, control ON
-#   2d / sim2d          2-D SFML view (driver:=true for real hardware)
-#   3d / sim3d          3-D Gazebo simulation
-#   manual              fake hardware + manual target-position node
-#   <other args>        executed as a shell command (dev shell / builds)
-#
-# Motion is ON by default; pass control:=false to observe only.
-#
-# Works in all supported layouts:
-#   * native, workspace root : arm_ws/ with this repo under src/ (e.g.
-#                              arm_ws/src/fyp/arm); run from arm_ws or from
-#                              the package directory
-#   * Docker, standalone     : repo mounted at /root/ws (repo root IS the arm
-#                              package)
-#   * Docker, parent fyp     : sources mounted at /root/ros2_ws/src/arm
-#
-# The 2-D view needs the optional arm_sim_sfml executable, which is only built
-# when SFML is installed (Ubuntu: sudo apt install libsfml-dev). Without it use
-# `./run_arm.sh hardware` or `./run_arm.sh simulation`.
-#
-# Extra launch arguments passed after the mode are forwarded unchanged, e.g.:
-#   ./run_arm.sh 2d driver:=true control:=false
-#   ./run_arm.sh hardware control:=false
-#
-# Per-machine overrides come from the sourced environment:
-#   source .env && ./run_arm.sh 2d
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ROS 2 environment. Prefer an already-active ROS_DISTRO; otherwise default to
-# Humble, which is what the provided Docker image uses.
 ROS_SETUP="/opt/ros/${ROS_DISTRO:-humble}/setup.bash"
 if [ -f "$ROS_SETUP" ]; then
-  # shellcheck disable=SC1090
   source "$ROS_SETUP"
 elif ! command -v ros2 >/dev/null 2>&1; then
   echo "run_arm.sh: ROS 2 not found (looked for $ROS_SETUP)." >&2
@@ -47,9 +13,6 @@ elif ! command -v ros2 >/dev/null 2>&1; then
   exit 1
 fi
 
-# Source the workspace overlay when one exists. In a native workspace this
-# walks up from this script (arm_ws/src/.../arm -> arm_ws/install/setup.bash),
-# so the script also works when invoked from the package directory.
 find_overlay() {
   local dir="$SCRIPT_DIR"
   while [ "$dir" != "/" ]; do
@@ -70,22 +33,16 @@ elif overlay="$(find_overlay)"; then
   source "$overlay"
 fi
 
-# Optional parameter-set override (see arm/config/):
-#   ARM_PARAMS_FILE=/path/to/arm_gen0_params.yaml ./run_arm.sh 2d
 PARAMS_ARG=()
 [ -n "${ARM_PARAMS_FILE:-}" ] && PARAMS_ARG=(params_file:="$ARM_PARAMS_FILE")
 
 if [ $# -eq 0 ]; then
-  # Real hardware with the 2-D model reference; motion is on by default.
   set -- 2d driver:=true
 fi
 
 MODE="$1"
 shift
 
-# The 2-D view is optional: it is built only when SFML is available. Check for
-# the executable up front and explain how to enable it instead of letting ros2
-# launch fail with a generic "executable not found".
 require_sfml_sim() {
   local prefix
   prefix="$(ros2 pkg prefix arm 2>/dev/null || true)"
@@ -103,7 +60,6 @@ require_sfml_sim() {
   exit 1
 }
 
-# The Gazebo package is a separate (nested) package and may not be built.
 require_arm_gazebo() {
   if ros2 pkg prefix arm_gazebo >/dev/null 2>&1; then
     return 0

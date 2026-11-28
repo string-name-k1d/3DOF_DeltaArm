@@ -17,6 +17,7 @@
 #include "arm/msg/motor_feedback.hpp"
 #include "arm/msg/motor_targets.hpp"
 #include "arm/delta_arm.hpp"
+#include "arm/trajectory_modifier.hpp"
 
 namespace DeltaArmRos
 {
@@ -57,11 +58,15 @@ private:
   rclcpp::TimerBase::SharedPtr feedback_timer_;
 
   std::shared_ptr<GoalHandle> current_goal_handle_;
+  rclcpp_action::GoalUUID active_goal_uuid_{};
   std::mutex goal_mutex_;
 
   DeltaArm::Arm arm_;
   std::mutex arm_mutex_;
   std::atomic<bool> feedback_seen_{false};
+
+  DeltaArm::EndpointTrajectoryModifier trajectory_;
+  DeltaArm::MotorAccelLimiter motor_limiter_;
 
   double feedback_rate_;
   std::string feedback_frame_;
@@ -70,6 +75,13 @@ private:
   bool simulate_arrival_;
   bool enable_motion_;
   bool publish_joints_;
+
+  bool trajectory_enabled_;
+  double trajectory_rate_;
+  double endpoint_max_speed_;
+  double endpoint_max_accel_;
+  double motor_max_speed_;
+  double motor_max_accel_;
 };
 
 }

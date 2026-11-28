@@ -4,7 +4,17 @@ arm_controller:
     feedback_rate: 20.0
     feedback_frame: "base_link"
     reach_tolerance: 0.005
-    reach_timeout: 10.0
+    reach_timeout: 15.0
+
+    trajectory:
+      enabled: true
+      rate: 20.0
+      max_speed: 0.08
+      max_accel: 0.2
+
+    motor_limits:
+      max_speed: 30.0
+      max_accel: 60.0
 
 /**:
   ros__parameters:
@@ -38,7 +48,7 @@ arm_motor_driver:
     baudrate: 115200
     servo_ids: [0, 1, 2]
     start_angles: [0.0, 0.0, 0.0]
-    max_speed: 100.0
+    max_speed: 30.0
     auto_init: true
     targets_topic: "arm/motor_targets"
     offline_streak: 3

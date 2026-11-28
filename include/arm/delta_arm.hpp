@@ -81,6 +81,7 @@ public:
 
   void get_motor_current(float out[3]) const;
   void get_motor_targets(float out[3]) const;
+  void set_motor_targets(const float angles_deg[3]);
 
   float arm_angle_from_motor_deg(float motor_deg, int leg) const;
   bool get_linkage_band(int leg, float & lo_deg, float & hi_deg) const;

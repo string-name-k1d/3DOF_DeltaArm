@@ -611,6 +611,14 @@ void Arm::get_motor_targets(float out[3]) const {
         out[i] = motors_[i].tar_pos;
 }
 
+void Arm::set_motor_targets(const float angles_deg[3]) {
+    for (int i = 0; i < 3; ++i) {
+        tar_angles_[i] = angles_deg[i];
+        motors_[i].set_tar_pos(angles_deg[i]);
+    }
+    tar_pos_ = forward_kinematics(tar_angles_);
+}
+
 void Arm::stop() {
 
     for (int i = 0; i < 3; ++i) {

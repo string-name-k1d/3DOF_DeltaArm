@@ -56,6 +56,11 @@ behaviour.
 | `arm/motor_targets` | topic `MotorTargets` | controller -> driver |
 | `arm/MotorFeedback` | topic `MotorFeedback` | measured servo angles/status |
 
+`arm/set_pos` goals are smoothed by a straight-line endpoint modifier with
+speed/acceleration limits (`trajectory.*`), and the resulting motor targets are
+rate-limited per servo (`motor_limits.*`). Set `trajectory.enabled: false` to
+send the goal directly; motor limits still apply.
+
 `arm/joints` is an optional 2-D debug stream. See
 [kinematics.md](delta_arm_skill/kinematics.md) and
 [motion_limits.md](delta_arm_skill/motion_limits.md) for the IK model and

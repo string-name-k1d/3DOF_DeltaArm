@@ -1,4 +1,4 @@
-"""Shared arm controller / driver / manual bringup."""
+"""Shared arm controller / driver / manual / state-interface bringup."""
 
 import os
 
@@ -20,6 +20,7 @@ def generate_launch_description():
     control = LaunchConfiguration('control')
     manual = LaunchConfiguration('manual')
     publish_joints = LaunchConfiguration('publish_joints')
+    interface = LaunchConfiguration('interface')
 
     enable_motion = ParameterValue(control, value_type=bool)
     publish_joints_flag = ParameterValue(publish_joints, value_type=bool)
@@ -53,6 +54,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'publish_joints', default_value='false',
             description='Publish the 2-D debug arm/joints topic.'),
+        DeclareLaunchArgument(
+            'interface', default_value='true',
+            description='Start the arm/set_state + arm/get_state interface.'),
         Node(
             package='arm',
             executable='arm_controller',
@@ -81,5 +85,13 @@ def generate_launch_description():
             output='screen',
             parameters=[params_file],
             condition=IfCondition(manual),
+        ),
+        Node(
+            package='arm',
+            executable='arm_interface_node',
+            name='arm_interface_node',
+            output='screen',
+            parameters=[params_file],
+            condition=IfCondition(interface),
         ),
     ])

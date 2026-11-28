@@ -4,12 +4,14 @@
   <name>arm</name>
   <version>0.1.0</version>
   <description>
-    3DOF delta arm: IK controller, servo driver, and optional 2-D visualiser.
+    3DOF delta arm: IK controller, servo driver, state-machine interface, and
+    optional 2-D visualiser.
   </description>
   <maintainer email="dik210705@gmail.com">string-name-k1d</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
   <depend>rclcpp</depend>
@@ -19,6 +21,7 @@
   <depend>action_msgs</depend>
   <depend>sensor_msgs</depend>
 
+  <exec_depend>rclpy</exec_depend>
   <exec_depend>rosidl_default_runtime</exec_depend>
   <test_depend>ament_cmake_gtest</test_depend>
 

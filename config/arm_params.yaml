@@ -56,3 +56,10 @@ arm_motor_driver:
 arm_manual_control:
   ros__parameters:
     step: 0.01
+
+arm_interface:
+  ros__parameters:
+    home_position: [0.0, 0.0, -0.28]
+    move_timeout: 10.0
+    action_wait_timeout: 2.0
+    cancel_timeout: 2.0

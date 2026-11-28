@@ -15,11 +15,11 @@ descriptions; design notes, derivations and diagnostics live here.
 
 ```bash
 ros2 launch arm hardware.launch.py interface:=true
-ros2 service call /arm/move_to arm/srv/MoveTo \
-  "{target: {x: 0.0, y: 0.0, z: -0.28}, timeout: 10.0}"
+ros2 service call /arm/set_state arm/srv/SetState "{state: 1}"  # manual
+ros2 service call /arm/set_state arm/srv/SetState "{state: 2}"  # home
+ros2 service call /arm/set_state arm/srv/SetState "{state: 0}"  # stop
+ros2 service call /arm/set_state arm/srv/SetState "{state: 3}"  # hold
 ros2 service call /arm/get_state arm/srv/GetState "{}"
-ros2 service call /arm/home arm/srv/Home "{}"
-ros2 service call /arm/stop arm/srv/Stop "{}"
 ```
 
 Python clients can use:
@@ -29,9 +29,12 @@ from arm_interface import ArmClient
 
 arm = ArmClient()
 arm.wait_for_services()
-arm.move_to(0.0, 0.0, -0.28)
+arm.manual()
+arm.home()
 state = arm.get_state()
+print(state.state_name, state.position)
 ```
 
-Motion is disabled by `control:=false`; the interface then still answers state
-queries but refuses move commands.
+The interface starts in `manual`, leaving the raw `arm/set_pos` action as the
+default control path. Motion is disabled by `control:=false`; the interface then
+still answers state queries but `home` reports `STATUS_ACTION_UNAVAILABLE`.

@@ -1,0 +1,20 @@
+uint8 STATE_STOP=0
+uint8 STATE_MANUAL=1
+uint8 STATE_HOME=2
+uint8 STATE_HOLD=3
+
+uint8 state
+---
+uint8 STATUS_OK=0
+uint8 STATUS_UNREACHABLE=1
+uint8 STATUS_POS_NOT_REACHED=2
+uint8 STATUS_ACTION_UNAVAILABLE=3
+uint8 STATUS_CANCELED=4
+uint8 STATUS_ERROR=5
+
+bool success
+uint8 status
+uint8 state
+string state_name
+string message
+geometry_msgs/Point reached_position

@@ -14,6 +14,7 @@ endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -39,12 +40,17 @@ set(arm_msg_files
   "msg/MotorFeedback.msg"
   "msg/MotorTargets.msg"
 )
+set(arm_srv_files
+  "srv/GetState.srv"
+  "srv/SetState.srv"
+)
 set(arm_action_files
   "action/SetPosition.action"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${arm_msg_files}
+  ${arm_srv_files}
   ${arm_action_files}
   DEPENDENCIES std_msgs geometry_msgs action_msgs
 )
@@ -163,6 +169,11 @@ install(DIRECTORY launch
 )
 install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
+)
+ament_python_install_package(arm_interface)
+install(PROGRAMS arm_interface/interface_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME arm_interface_node
 )
 install(DIRECTORY include/
   DESTINATION include

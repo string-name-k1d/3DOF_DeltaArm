@@ -12,17 +12,24 @@
 
 ## High-level services
 
-`arm_interface_node` bridges the action/topic layer to simple services. Start it
-with `interface:=true` on any bringup.
+`arm_interface_node` bridges the action/topic layer to a small state machine.
+Start it with `interface:=true` on any bringup. The default state is `manual`.
 
 | Service | Type | Purpose |
 |---|---|---|
-| `arm/move_to` | `arm/srv/MoveTo` | move to a `Point` and wait for the action result. |
-| `arm/get_state` | `arm/srv/GetState` | snapshot of `arm/pos` and `arm/MotorFeedback`. |
-| `arm/home` | `arm/srv/Home` | move to `arm_interface.home_position`. |
-| `arm/stop` | `arm/srv/Stop` | cancel the active move. |
+| `arm/set_state` | `arm/srv/SetState` | transition to `stop` / `manual` / `home` / `hold`. |
+| `arm/get_state` | `arm/srv/GetState` | current state plus snapshot of `arm/pos` and `arm/MotorFeedback`. |
 
-Response status constants are shared by `MoveTo` and `Home`:
+State values: `stop=0`, `manual=1`, `home=2`, `hold=3`.
+
+- `manual`: cancel any interface-owned move and leave `arm/set_pos` to the raw
+  controller/manual node.
+- `home`: drive to `arm_interface.home_position` via `arm/set_pos`, then enter
+  `home`.
+- `stop`: cancel the interface-owned move and enter `stop`.
+- `hold`: placeholder state (TBD); no new command is issued.
+
+Response status constants:
 
 ```text
 STATUS_OK = 0
@@ -34,7 +41,7 @@ STATUS_ERROR = 5
 ```
 
 When `control:=false` the action server is absent; state queries still work, but
-move/home return `STATUS_ACTION_UNAVAILABLE`.
+requesting `home` returns `STATUS_ACTION_UNAVAILABLE` and the state is unchanged.
 
 ## Python client
 
@@ -44,12 +51,12 @@ from arm_interface import ArmClient
 arm = ArmClient(node_name='dock_arm_client')
 arm.wait_for_services(timeout_sec=5.0)
 
-arm.move_to(0.0, 0.0, -0.28, timeout=10.0)
+arm.manual()
+arm.home()
 state = arm.get_state()
-print(state.position.x, state.motor_angles_current)
+print(state.state_name, state.position, state.motor_angles_current)
 
 arm.stop()
-arm.home()
 ```
 
 `ArmClient` uses only the service layer, so drone nodes do not need to know the

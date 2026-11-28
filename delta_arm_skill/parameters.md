@@ -68,7 +68,7 @@ clamp. Each step starts from the last measured pose on `arm/pos`.
 
 | Parameter | Default | Meaning |
 |---|---:|---|
-| `home_position` | `[0,0,-0.28]` | target used by `arm/home`. |
+| `home_position` | `[0,0,-0.28]` | target used when entering the `home` state. |
 | `move_timeout` | 10.0 | fallback timeout when a service request uses 0. |
 | `action_wait_timeout` | 2.0 | seconds to wait for `arm/set_pos` server. |
 | `cancel_timeout` | 2.0 | seconds to wait for action cancellation. |
